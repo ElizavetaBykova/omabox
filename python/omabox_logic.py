@@ -12,8 +12,9 @@ from datetime import datetime, timedelta
 #   deadline_h: max hours from drop-off until the sample must be at the lab
 #   max_temp_c / min_temp_c: box temperature outside this range is flagged for kits of this type
 #                            (None = no limit on that side)
-# The box itself is NOT refrigerated, so for samples that must be kept at 2-8 C we use the
-# un-chilled time limit, or the max_temp_c makes a room-temperature box flag them at once.
+# The box is NOT refrigerated: it is for room-temperature samples only. Cold-chain samples
+# (e.g. swabs in transport medium at 2-8 C) and very short-lived ones (unpreserved urine, 2 h)
+# were removed 14 Nov - they would be flagged urgent the moment they are dropped.
 # To add a type: add a row here (with its source). Everything else follows automatically.
 SAMPLE_TYPES = {
     # --- sourced (see CLAUDE.md "Key facts") ---
@@ -25,8 +26,6 @@ SAMPLE_TYPES = {
     "FIT": {"name": "FIT stool kit", "deadline_h": 14 * 24, "min_temp_c": None, "max_temp_c": 30.0},
 
     # --- UNVERIFIED (from a team list 14 Nov, no source yet; find sources before using in the pitch) ---
-    # Swab in viral transport medium (COVID-19/flu/RSV, VTM/UTM): 2-8 C, max 72 h.
-    "SWB": {"name": "swab in transport medium", "deadline_h": 72, "min_temp_c": 2.0, "max_temp_c": 8.0},
     # Dry swab without medium (COVID-19/flu/RSV): 15-25 C, 24-48 h -> conservative 24 h.
     "DSW": {"name": "dry swab", "deadline_h": 24, "min_temp_c": 15.0, "max_temp_c": 25.0},
     # Cheek swab for DNA (pharmacogenetics): 15-30 C, "weeks to months" -> conservative 7 days.
@@ -34,8 +33,6 @@ SAMPLE_TYPES = {
     # Dried blood spot on filter paper: 15-25 C, "weeks to months" -> conservative 7 days.
     # Also must avoid high humidity (Modulino Thermo measures it - not checked yet).
     "DBS": {"name": "dried blood spot", "deadline_h": 7 * 24, "min_temp_c": 15.0, "max_temp_c": 25.0},
-    # Unpreserved urine: 2 h if not chilled (24 h only if kept at 2-8 C; this box is not chilled).
-    "URI": {"name": "urine sample (unpreserved)", "deadline_h": 2, "min_temp_c": 2.0, "max_temp_c": None},
 }
 # A type the lab has not configured: a fixed, cautious rule (24 h, 15-25 C) and a flag to the lab.
 # (Not "the strictest of every limit": with cold-chain types that would be an impossible 15-8 C range.)
@@ -168,8 +165,15 @@ def facts_text(box, decision):
     return " ".join([f"{text}.", *decision["notes"], ACTION[decision["level"]]])
 
 
+def temp_fact(box):
+    """The measured box temperature as an extra fact (Dev 2, Thermo sensor); empty if no reading yet."""
+    t = box.get("temp_c")
+    return "" if t is None else f"Current measured box temperature: {float(t):.1f} C."
+
+
 def build_prompt(box, decision):
-    return (f"{facts_text(box, decision)}\n"
+    return (f"{facts_text(box, decision)}\n{temp_fact(box)}\n"
+            "Any temperature warning is already in the facts above; do not invent another one. "
             f"Rewrite this as one short, friendly message for the courier. Keep every number. {NO_THINK}")
 
 
@@ -200,7 +204,7 @@ def invented_numbers(text, facts):
 
 def check_message(text, box, decision):
     """Return (fixed_text, None) if usable, or (text, reason) if it must be rejected."""
-    facts = facts_text(box, decision)
+    facts = f"{facts_text(box, decision)} {temp_fact(box)}"
     level = decision["level"]
     if not text:
         return text, "empty after removing thinking text"
@@ -253,9 +257,13 @@ def notify(box, ask, now=None):
 
     Returns the decision plus: message, source ("llm" or "template"),
     raw (what the model said) and rejected (why the LLM text was not used, or None).
+    ask=None: template only, at once (the LLM version comes later in the background).
     """
     now = now or datetime.now()
     decision = box_decision(box, now)
+    if ask is None:
+        return {**decision, "message": template_message(box, decision), "source": "template",
+                "raw": "", "rejected": None}
     prompt = build_prompt(box, decision)
     raw, rejected = "", None
     try:
@@ -304,8 +312,6 @@ SCENARIO_DATA = {
     "fit_old": ("Kotka pharmacy", 24.0, [("FIT-0501", 13 * 24 + 18)]),                 # FIT with 6 h left
     "health":  ("Lahti health centre", 21.0, [("HPV-0601", 4)]),                       # "health" is in the facts
     "unknown": ("Vantaa pharmacy", 21.0, [("UTI-0801", 2), ("HPV-0802", 5)]),         # type not in SAMPLE_TYPES
-    "urine":   ("Oulu pharmacy", 21.0, [("URI-0901", 1)]),                         # urgent: 2 h limit
-    "swab_warm": ("Turku library", 21.0, [("SWB-1001", 1)]),                       # urgent: needs 2-8 C
     "mixed":   ("Helsinki pharmacy", 22.0, [("DNA-1101", 30), ("DBS-1102", 50), ("DSW-1103", 3)]),  # ok
     "cold":    ("Oulu library", 2.5, [("HPV-1201", 2), ("FIT-1202", 5)]),             # urgent: too cold
     "full":    ("Espoo health centre", 23.0, [(f"{'HPV' if i % 2 else 'FIT'}-07{i:02d}", i * 1.5)

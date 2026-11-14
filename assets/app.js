@@ -44,6 +44,7 @@ const notificationCount = document.getElementById('notification-count');
 function renderNotification(n) {
   const card = document.createElement('div');
   card.className = `notification light-${n.light}`;
+  if (n.id !== undefined && n.id !== null) card.dataset.id = n.id;
 
   const meta = document.createElement('div');
   meta.className = 'notification-meta';
@@ -52,7 +53,7 @@ function renderNotification(n) {
   level.textContent = n.level + (n.pickup ? ' · pickup' : '');
   const source = document.createElement('span');
   source.className = `badge source-${n.source}`;
-  source.textContent = n.source === 'llm' ? `LLM ${n.secs}s` : 'template';
+  source.textContent = n.pending ? 'template · LLM writing…' : (n.source === 'llm' ? `LLM ${n.secs}s` : 'template');
   const where = document.createElement('span');
   const temp = n.temp_c === null || n.temp_c === undefined ? '– °C' : `${n.temp_c} °C`;
   where.textContent = `${n.time} · ${n.box_id} · ${n.location} · ${n.kits} kits · ${temp} · ${n.scenario}`;
@@ -77,9 +78,16 @@ function updateNotificationCount() {
   noNotifications.style.display = count ? 'none' : 'block';
 }
 
-/** A new notification: newest on top. */
+/** A new notification: newest on top. Same id = the LLM version of a card already shown: replace it. */
 function handleNotification(n) {
-  notificationsContainer.prepend(renderNotification(n));
+  const card = renderNotification(n);
+  const old = n.id !== undefined && n.id !== null
+    ? notificationsContainer.querySelector(`[data-id="${CSS.escape(String(n.id))}"]`) : null;
+  if (old) {
+    old.replaceWith(card);
+  } else {
+    notificationsContainer.prepend(card);
+  }
   updateNotificationCount();
 }
 

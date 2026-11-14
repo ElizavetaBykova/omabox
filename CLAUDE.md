@@ -6,8 +6,10 @@ Team: 3 people — Dev 1 (UNO Q, LLM, Python logic), Dev 2 (sensors + camera), B
 ## What OmaBox is
 A smart drop-off box for ALL home-collected lab samples (starting with HPV self-sampling kits and FIT stool
 kits from national screening), placed in pharmacies, libraries or health centres where a lab courier already
-stops. Sample types and their rules (deadline, max temperature) live in `SAMPLE_TYPES` in omabox_logic.py;
-the lab configures them, the box enforces them. Unknown types get the strictest rule and are flagged.
+stops. Sample types and their rules (deadline, min/max temperature) live in `SAMPLE_TYPES` in omabox_logic.py;
+the lab configures them, the box enforces them. Unknown types get a cautious fixed rule (24 h, 15–25 °C) and
+are flagged. The box is NOT refrigerated: room-temperature samples only (HPV, FIT; unsourced examples DSW,
+DNA, DBS). Cold-chain swabs (SWB, 2–8 °C) and unpreserved urine (URI, 2 h) were removed 14 Nov.
 
 Decision 14 Nov ~14:10: after mentor feedback (AstraZeneca said their real gap is waiting for doctor
 appointments after results, so OmaBox is not their direction) and three explored pivots, the team chose to
@@ -82,9 +84,11 @@ omabox/
 │   │                     #   decisions, prompt, cleanup, checks, template fallback, test SCENARIO_DATA
 │   ├── run_laptop.py     # laptop-only test of omabox_logic (Dev 1), template or Ollama
 │   ├── prompts.py, system_prompt.txt   # from the original example (unused)
-│   ├── qr_scanner.py     # (Dev 2) QR scanner, desktop-style for now; to become scan_kit() for the board
+│   ├── camera.py         # headless KitScanner.scan_kit() for the board (Phase 3); `python3 camera.py` to test
+│   ├── qr_scanner.py     # (Dev 2) original desktop QR scanner (window + events.jsonl); not used by the app
 │   └── requirements.txt  # intentionally empty (see opencv note above)
-└── sketch/               # (Dev 2, coming) sketch.ino + sketch.yaml for Modulinos on the MCU
+└── sketch/               # (Dev 2) sketch.ino: Thermo (SHT30-compatible, I2C 0x44/0x45) -> Bridge
+                          #   "read_temperature_c" (-999 = sensor error)
 ```
 File ownership: Dev 1 edits main.py + omabox_logic.py + run_laptop.py; Dev 2 edits qr_scanner.py + sketch/.
 Avoid editing the other's files — suggest changes instead.
@@ -95,11 +99,11 @@ Avoid editing the other's files — suggest changes instead.
 | empty | off | no | no kits |
 | ok | green | no | all kits ≥ 12 h left, box within limits |
 | soon | yellow | yes ("collect today") | a kit has < 12 h left |
-| urgent | red | yes ("as soon as possible") | a kit has < 4 h left, or box above the strictest kit's max_temp_c |
+| urgent | red | yes ("as soon as possible") | a kit has < 4 h left, or box outside the most sensitive kit's min/max temp |
 | overdue | red | yes + "tell the lab it is late" | a kit is past its deadline |
-Unknown sample types (not in SAMPLE_TYPES) use the strictest rule and add a "check it with the lab" note.
+Unknown sample types (not in SAMPLE_TYPES) use UNKNOWN_RULE and add a "check it with the lab" note.
 Test scenarios: `SCENARIO_DATA` (normal=ok, hpv_3h_left=urgent, warm, empty, soon, single, overdue, hot_late,
-fit_old, health, unknown, full) — shared by the board self-test and run_laptop.py.
+fit_old, health, unknown, mixed, cold, full) — shared by the board self-test and run_laptop.py.
 
 ## Event contract (between sensors/camera and the logic)
 ```json
@@ -138,9 +142,11 @@ Chat commands for demo without hardware: `drop HPV-0001 21h`, `temp 33`, `collec
        per-sample temperature limits) — last board run of the generalised version still to confirm
 2. [x] Real box state (BoxState + handle_event), saved to data/box_state.json, chat commands, page cards;
        checks also reject a wrong kit count and messages that leave out a problem — board run still to confirm
-3. [ ] Camera on the board: headless non-blocking scan_kit(), `kit_dropped` events; LLM in background
-       (template shown at once, LLM text replaces it); camera paused while the LLM runs (RAM)
-4. [ ] Sensors over Bridge (Thermo temp, Knob = emptied, Buzzer/Pixels = status)
+3. [x] Camera on the board: camera.py KitScanner.scan_kit() (headless, finds the first /dev/videoN that
+       gives a frame), camera_loop in main.py -> `kit_dropped` (same code ignored until out of sight 10 s);
+       on_event shows the template card at once, llm_worker replaces it with the LLM text (same card id);
+       camera released while the LLM runs. Tested on laptop with fake bricks — board run still to confirm
+4. [~] Temperature done (sensor_loop: Bridge read every 30 s -> `temp_reading`); Knob/Buzzer/Pixels left
 5. [ ] Pickup agent tools: request_pickup(urgency), set_status_light(color), notify_staff(message)
 6. [ ] Dashboard: live box status only (kits, hours left, temp, light, last message)
 7. [ ] Polish: demo mode (fast clock), Project Hub page, submission, demo video
