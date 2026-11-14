@@ -28,17 +28,20 @@ const mainContent = document.querySelector('.main-content');
 const sendButton = document.getElementById('send-button');
 const sendButtonImg = sendButton ? sendButton.querySelector('img') : null;
 const clearChatButton = document.getElementById('clear-chat-button-header');
+const notificationItems = [];
 
 function onUIConnected() {
   console.log('Connected to backend');
   hideError();
+  setConnectionState('connected');
   ui.send_message('get_notifications', {}); // also shows notifications made before the page was opened
 }
 
-// ---------- OmaBox notifications ----------
+// ---------- LähiLab notifications ----------
 const notificationsContainer = document.getElementById('notifications');
 const noNotifications = document.getElementById('no-notifications');
 const notificationCount = document.getElementById('notification-count');
+const navNotificationCount = document.getElementById('nav-notification-count');
 
 /** Builds one notification card. Uses textContent only (no HTML from the backend). */
 function renderNotification(n) {
@@ -72,34 +75,167 @@ function renderNotification(n) {
   return card;
 }
 
-function updateNotificationCount() {
-  const count = notificationsContainer.children.length;
+function notificationLevelLabel(level) {
+  const labels = {
+    empty: 'Empty',
+    ok: 'Within limits',
+    soon: 'Collect today',
+    urgent: 'Urgent pickup',
+    overdue: 'Overdue',
+  };
+  return labels[level] || 'Review status';
+}
+
+function isBoxEvent(n) {
+  return typeof n.scenario === 'string' && n.scenario.startsWith('event:');
+}
+
+function renderRecentItem(n) {
+  const item = document.createElement('article');
+  item.className = 'recent-item';
+
+  const level = document.createElement('span');
+  level.className = `mini-level level-${n.level || 'unknown'}`;
+  level.textContent = n.level || 'update';
+
+  const body = document.createElement('div');
+  const message = document.createElement('p');
+  message.textContent = n.message || 'Box status updated.';
+  const meta = document.createElement('small');
+  const details = [n.time, n.location, n.kits === null || n.kits === undefined ? null : `${n.kits} samples`]
+    .filter(Boolean);
+  meta.textContent = details.join(' · ');
+  body.append(message, meta);
+  item.append(level, body);
+  return item;
+}
+
+function renderBoxCard(box) {
+  const card = document.createElement('article');
+  card.className = `box-overview-card edge-${box.light || 'off'}`;
+
+  const header = document.createElement('div');
+  header.className = 'box-overview-header';
+  const identity = document.createElement('div');
+  const title = document.createElement('h3');
+  title.textContent = box.box_id;
+  const location = document.createElement('p');
+  location.textContent = box.location || 'Location not set';
+  identity.append(title, location);
+
+  const light = document.createElement('span');
+  light.className = `light-badge light-${box.light || 'off'}`;
+  light.textContent = box.light ? `${box.light} light` : 'No status';
+  header.append(identity, light);
+
+  const metrics = document.createElement('div');
+  metrics.className = 'box-overview-metrics';
+  const temperature = document.createElement('div');
+  const temperatureLabel = document.createElement('span');
+  temperatureLabel.textContent = 'Temperature';
+  const temperatureValue = document.createElement('strong');
+  temperatureValue.textContent = box.temp_c === null || box.temp_c === undefined
+    ? '— °C' : `${box.temp_c} °C`;
+  temperature.append(temperatureLabel, temperatureValue);
+
+  const kits = document.createElement('div');
+  const kitsLabel = document.createElement('span');
+  kitsLabel.textContent = 'Samples inside';
+  const kitsValue = document.createElement('strong');
+  kitsValue.textContent = box.kits === null || box.kits === undefined ? '—' : box.kits;
+  kits.append(kitsLabel, kitsValue);
+  metrics.append(temperature, kits);
+
+  const decision = document.createElement('div');
+  decision.className = 'box-overview-decision';
+  const level = document.createElement('span');
+  level.className = `mini-level level-${box.level || 'unknown'}`;
+  level.textContent = notificationLevelLabel(box.level);
+  const pickup = document.createElement('strong');
+  pickup.textContent = box.pickup ? 'Pickup required' : 'No pickup needed';
+  decision.append(level, pickup);
+
+  const update = document.createElement('p');
+  update.className = 'box-overview-update';
+  update.textContent = box.time ? `Last update · ${box.time}` : 'Last update received';
+
+  card.append(header, metrics, decision, update);
+  return card;
+}
+
+function refreshDashboard() {
+  const boxesById = new Map();
+  notificationItems.forEach(item => {
+    if (isBoxEvent(item) && item.box_id && !boxesById.has(item.box_id)) {
+      boxesById.set(item.box_id, item);
+    }
+  });
+  const boxes = Array.from(boxesById.values());
+  const boxCount = boxes.length;
+  const sampleCount = boxes.reduce((total, box) =>
+    total + (typeof box.kits === 'number' && Number.isFinite(box.kits) ? box.kits : 0), 0);
+  const pickupCount = boxes.filter(box => box.pickup).length;
+  const attentionCount = boxes.filter(box => box.light === 'red' || box.light === 'yellow').length;
+
+  document.getElementById('dashboard-box-count').textContent = boxCount;
+  document.getElementById('dashboard-kits').textContent = sampleCount;
+  document.getElementById('dashboard-pickups').textContent = pickupCount;
+  document.getElementById('dashboard-attention').textContent = attentionCount;
+  document.getElementById('dashboard-box-grid-count').textContent = boxCount;
+
+  const boxesGrid = document.getElementById('dashboard-boxes-grid');
+  const boxesEmpty = document.getElementById('dashboard-boxes-empty');
+  boxesGrid.replaceChildren(...boxes.map(renderBoxCard));
+  boxesEmpty.style.display = boxCount ? 'none' : 'block';
+
+  const recent = document.getElementById('dashboard-activity');
+  const recentEmpty = document.getElementById('dashboard-activity-empty');
+  const recentEvents = notificationItems.filter(isBoxEvent).slice(0, 4);
+  recent.replaceChildren(...recentEvents.map(renderRecentItem));
+  recentEmpty.style.display = recentEvents.length ? 'none' : 'block';
+}
+
+function renderNotificationList() {
+  notificationsContainer.replaceChildren(...notificationItems.map(renderNotification));
+  const count = notificationItems.length;
   notificationCount.textContent = count;
+  navNotificationCount.textContent = count;
   noNotifications.style.display = count ? 'none' : 'block';
+  refreshDashboard();
 }
 
 /** A new notification: newest on top. Same id = the LLM version of a card already shown: replace it. */
 function handleNotification(n) {
-  const card = renderNotification(n);
-  const old = n.id !== undefined && n.id !== null
-    ? notificationsContainer.querySelector(`[data-id="${CSS.escape(String(n.id))}"]`) : null;
-  if (old) {
-    old.replaceWith(card);
+  const index = n.id === undefined || n.id === null
+    ? -1 : notificationItems.findIndex(item => String(item.id) === String(n.id));
+  if (index >= 0) {
+    notificationItems[index] = n;
   } else {
-    notificationsContainer.prepend(card);
+    notificationItems.unshift(n);
   }
-  updateNotificationCount();
+  renderNotificationList();
 }
 
 /** The full list (oldest first) sent on connect. */
 function handleNotificationList(list) {
-  notificationsContainer.innerHTML = '';
-  (list || []).forEach(n => notificationsContainer.prepend(renderNotification(n)));
-  updateNotificationCount();
+  notificationItems.splice(0, notificationItems.length, ...(Array.isArray(list) ? [...list].reverse() : []));
+  renderNotificationList();
 }
 
 function onUIDisconnected() {
+  setConnectionState('disconnected');
   showError('Connection to backend lost. Please refresh the page or check the backend server.');
+}
+
+function setConnectionState(state) {
+  const indicator = document.getElementById('connection-indicator');
+  const label = document.getElementById('connection-label');
+  const pill = document.getElementById('topbar-connection');
+  const connected = state === 'connected';
+  indicator.className = `connection-indicator is-${state}`;
+  label.textContent = connected ? 'Connected to box' : state === 'connecting' ? 'Connecting…' : 'Box offline';
+  pill.className = `connection-pill is-${state}`;
+  pill.textContent = connected ? 'Connected' : state === 'connecting' ? 'Connecting' : 'Offline';
 }
 
 /**
@@ -400,3 +536,38 @@ clearChatButton.addEventListener('click', event => {
     sendClearChatCommand();
   }
 });
+
+const pageTitles = {
+  dashboard: 'Box overview',
+  chat: 'Box assistant',
+  activity: 'Notifications',
+};
+
+function showPage(pageName) {
+  const title = pageTitles[pageName];
+  if (!title) return;
+
+  document.querySelectorAll('.page-view').forEach(page => {
+    page.hidden = page.id !== `page-${pageName}`;
+  });
+  document.querySelectorAll('.nav-link').forEach(link => {
+    const active = link.dataset.page === pageName;
+    link.classList.toggle('is-active', active);
+    if (active) {
+      link.setAttribute('aria-current', 'page');
+    } else {
+      link.removeAttribute('aria-current');
+    }
+  });
+  document.getElementById('page-title').textContent = title;
+}
+
+document.querySelectorAll('[data-page]').forEach(link => {
+  link.addEventListener('click', event => {
+    event.preventDefault();
+    showPage(link.dataset.page);
+  });
+});
+
+setConnectionState('connecting');
+renderNotificationList();

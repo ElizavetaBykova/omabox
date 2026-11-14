@@ -9,65 +9,190 @@ SPDX-License-Identifier: MPL-2.0
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OmaBox</title>
+    <title>LähiLab — box dashboard</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div class="container">
-      <main>
-        <div class="header">
-          <div class="header-left">
-            <img src="img/RGB-Arduino-Logo-Color-Inline-Loop.svg" alt="Arduino Logo" class="arduino-logo" />
-            <p class="arduino-text">OmaBox — sample box notifications</p>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#" aria-label="LähiLab dashboard" data-page="dashboard">
+          <img src="img/RGB-Arduino-Logo-Color-Inline-Loop.svg" alt="" class="brand-logo" />
+          <span>
+            <strong>LähiLab</strong>
+            <small>Sample drop-off</small>
+          </span>
+        </a>
+
+        <nav class="primary-nav" aria-label="Main navigation">
+          <button class="nav-link is-active" type="button" data-page="dashboard" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">▦</span>
+            <span>Overview</span>
+          </button>
+          <button class="nav-link" type="button" data-page="chat">
+            <span class="nav-icon" aria-hidden="true">◉</span>
+            <span>Box assistant</span>
+          </button>
+          <button class="nav-link" type="button" data-page="activity">
+            <span class="nav-icon" aria-hidden="true">☷</span>
+            <span>Notifications</span>
+            <span id="nav-notification-count" class="nav-count">0</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span id="connection-indicator" class="connection-indicator" aria-hidden="true"></span>
+          <span>
+            <strong id="connection-label">Connecting…</strong>
+            <small>LähiLab controller</small>
+          </span>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">HOME SAMPLE COLLECTION</p>
+            <h1 id="page-title">Box overview</h1>
           </div>
-          <div class="header-right">
-            <button id="clear-chat-button-header">
-              <img
-                src="img/reset.svg"
-                alt="Reset"
-                style="width: 20px; height: 20px; padding-right: 8px; vertical-align: middle" />Reset chat
+          <div class="topbar-actions">
+            <span id="topbar-connection" class="connection-pill is-connecting">Connecting</span>
+            <button id="clear-chat-button-header" class="icon-button" type="button" title="Reset chat" aria-label="Reset chat">
+              <img src="img/reset.svg" alt="" />
             </button>
           </div>
-        </div>
-        <div class="omabox-layout">
-        <aside id="notifications-panel">
-          <div class="panel-header">
-            <h2>Notifications</h2>
-            <span id="notification-count">0</span>
-          </div>
-          <p id="no-notifications" class="panel-empty">Waiting for the box… (the self-test sends the first ones)</p>
-          <div id="notifications"></div>
-        </aside>
-        <div class="main-content">
-          <div id="chat-container">
-            <div id="chat-messages-container">
-              <div id="empty-chat-container">
-                <div class="icon-and-greeting">
-                  <img src="img/green-stars.svg" alt="Green Stars" />
-                  <p class="greeting">Control the box</p>
+        </header>
+
+        <main id="page-dashboard" class="page-view">
+          <section class="welcome-row">
+            <div>
+              <h2>Live box status</h2>
+              <p>Current samples, temperature and pickup decision.</p>
+            </div>
+            <button class="primary-button" type="button" data-page="chat">Open box assistant <span aria-hidden="true">→</span></button>
+          </section>
+
+          <section class="status-grid" aria-label="All monitored boxes">
+            <article class="metric-card">
+              <div class="metric-topline"><span>BOXES TRACKED</span><span class="metric-icon" aria-hidden="true">▦</span></div>
+              <strong id="dashboard-box-count" class="metric-value">0</strong>
+              <span class="metric-footnote">Boxes reporting to LähiLab</span>
+            </article>
+            <article class="metric-card">
+              <div class="metric-topline"><span>SAMPLES IN BOXES</span><span class="metric-icon" aria-hidden="true">▤</span></div>
+              <strong id="dashboard-kits" class="metric-value">0</strong>
+              <span class="metric-footnote">Across the latest box updates</span>
+            </article>
+            <article class="metric-card">
+              <div class="metric-topline"><span>PICKUPS NEEDED</span><span class="metric-icon" aria-hidden="true">↗</span></div>
+              <strong id="dashboard-pickups" class="metric-value">0</strong>
+              <span class="metric-footnote">Based on each box's latest decision</span>
+            </article>
+            <article class="metric-card">
+              <div class="metric-topline"><span>NEEDS ATTENTION</span><span class="metric-icon" aria-hidden="true">!</span></div>
+              <strong id="dashboard-attention" class="metric-value">0</strong>
+              <span class="metric-footnote">Urgent or collect-today status</span>
+            </article>
+          </section>
+
+          <section class="boxes-section">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">MONITORED LOCATIONS</p>
+                <h2>All boxes</h2>
+              </div>
+              <span id="dashboard-box-grid-count" class="total-count">0</span>
+            </div>
+            <p id="dashboard-boxes-empty" class="empty-state">No box updates yet. A box appears here after it reports its status.</p>
+            <div id="dashboard-boxes-grid" class="box-overview-grid"></div>
+          </section>
+
+          <section class="dashboard-grid dashboard-activity-grid">
+            <article class="surface-card recent-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">LATEST UPDATES</p>
+                  <h2>Recent activity</h2>
                 </div>
-                <p class="prompt-question">drop HPV-0001 21h · temp 33 · collected · pickup · status — or a test scenario name</p>
+                <button class="text-button" type="button" data-page="activity">View all <span aria-hidden="true">→</span></button>
               </div>
-              <div id="messages"></div>
+              <p id="dashboard-activity-empty" class="empty-state">No box updates yet.</p>
+              <div id="dashboard-activity" class="recent-list"></div>
+            </article>
+          </section>
+
+          <section class="assistant-banner">
+            <div>
+              <p class="eyebrow">NEED A QUICK UPDATE?</p>
+              <h2>Ask the box assistant</h2>
+              <p>Check status, register a drop-off or request a pickup.</p>
             </div>
-            <div class="input-container">
-              <div class="textarea-wrapper">
-                <textarea id="user-input" placeholder="e.g. drop HPV-0001 21h, temp 33, collected, status, or a scenario (normal, overdue, …)"></textarea>
+            <button class="primary-button" type="button" data-page="chat">Open assistant <span aria-hidden="true">→</span></button>
+          </section>
+        </main>
+
+        <main id="page-chat" class="page-view" hidden>
+          <div class="chat-layout">
+            <section class="main-content">
+              <div id="chat-container">
+                <div id="chat-messages-container">
+                  <div id="empty-chat-container">
+                    <div class="icon-and-greeting">
+                      <img src="img/green-stars.svg" alt="" />
+                      <p class="greeting">Control the box</p>
+                    </div>
+                    <p class="prompt-question">drop HPV-0001 21h · temp 33 · collected · pickup · status</p>
+                    <p class="chat-hint">You can also enter a test scenario name, such as <code>normal</code> or <code>overdue</code>.</p>
+                  </div>
+                  <div id="messages"></div>
+                </div>
+                <div class="input-container">
+                  <div class="textarea-wrapper">
+                    <textarea id="user-input" placeholder="e.g. drop HPV-0001 21h, temp 33, collected, pickup, status"></textarea>
+                  </div>
+                  <button id="send-button" type="button" aria-label="Send message">
+                    <img src="img/send.svg" alt="" />
+                  </button>
+                </div>
+                <p class="disclaimer">
+                  Messages are worded by a small LLM running locally on the board and checked against the box's facts;
+                  if a check fails, a fixed template is used. LähiLab does not analyse samples or give medical advice.
+                </p>
+                <button id="stop-stream-button" hidden>Stop Stream</button>
               </div>
-              <button id="send-button">
-                <img src="img/send.svg" alt="Send" />
-              </button>
-            </div>
-            <p class="disclaimer">
-              Messages are worded by a small LLM running locally on the board and checked against the box's facts;
-              if a check fails, a fixed template is used. OmaBox does not analyse samples or give medical advice.
-            </p>
-            <button id="stop-stream-button" hidden>Stop Stream</button>
+            </section>
+
+            <aside class="chat-help surface-card">
+              <p class="eyebrow">QUICK COMMANDS</p>
+              <h2>What can I do?</h2>
+              <ul>
+                <li><code>status</code><span>Get the current box status</span></li>
+                <li><code>drop HPV-0001 21h</code><span>Register a sample drop-off</span></li>
+                <li><code>temp 33</code><span>Record a temperature reading</span></li>
+                <li><code>pickup</code><span>Request a pickup</span></li>
+                <li><code>collected</code><span>Mark the box as emptied</span></li>
+              </ul>
+              <p class="small-note">The assistant reports box information only; it does not interpret test results.</p>
+            </aside>
           </div>
-        </div>
-        </div>
-      </main>
+        </main>
+
+        <main id="page-activity" class="page-view" hidden>
+          <section class="activity-page surface-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">BOX EVENT LOG</p>
+                <h2>Notifications</h2>
+                <p class="section-subtitle">Drop-offs, status changes and pickup updates from the connected box.</p>
+              </div>
+              <span id="notification-count" class="total-count">0</span>
+            </div>
+            <p id="no-notifications" class="empty-state">Waiting for the box…</p>
+            <div id="notifications" class="notification-list"></div>
+          </section>
+        </main>
+      </div>
     </div>
+
     <div id="error-banner" style="display: none">
       <p id="error-message"></p>
     </div>
