@@ -10,13 +10,14 @@
 #   3. Paste the console output (incl. "brick API" and "raw LLM output" lines) back to Claude.
 
 import inspect
+import math
 import threading
 import time
 from datetime import datetime
 
 from arduino.app_bricks.llm import LargeLanguageModel
 from arduino.app_bricks.web_ui import WebUI
-from arduino.app_utils import App
+from arduino.app_utils import App, Bridge
 
 from omabox_logic import SCENARIOS, SYSTEM_PROMPT, notify, scenario
 
@@ -100,6 +101,7 @@ def ask(prompt):
 notifications = []
 MAX_NOTIFICATIONS = 50
 llm_lock = threading.Lock()      # one LLM call at a time (self-test thread + chat page)
+SENSOR_ERROR_C = -99.0
 
 
 def publish(item):
@@ -111,9 +113,31 @@ def publish(item):
         print(f"(web page not updated: {e})")
 
 
+def read_temperature_c():
+    """Read and validate the current temperature reported by the MCU sensor."""
+    try:
+        value = Bridge.call("read_temperature_c", timeout=2)
+    except Exception as error:
+        raise RuntimeError(f"Could not read the temperature sensor: {error}") from error
+
+    if not isinstance(value, (int, float)):
+        raise RuntimeError(f"Temperature sensor returned an invalid value: {value!r}")
+
+    temperature_c = float(value)
+    if not math.isfinite(temperature_c) or temperature_c == SENSOR_ERROR_C:
+        raise RuntimeError("Temperature sensor read failed; check the sensor and I2C wiring.")
+    if not -40.0 <= temperature_c <= 125.0:
+        raise RuntimeError(f"Temperature sensor returned an out-of-range value: {temperature_c}")
+
+    return round(temperature_c, 1)
+
+
 def run(name):
     box = scenario(name)
     with llm_lock:
+        # Replace test-scenario temperature with the live hardware reading.
+        box["temp_c"] = read_temperature_c()
+        print(f"[{name}] live temperature: {box['temp_c']:.1f} C")
         start = time.time()
         result = notify(box, ask)
         secs = round(time.time() - start, 1)

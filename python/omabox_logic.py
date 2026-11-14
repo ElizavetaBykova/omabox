@@ -144,6 +144,9 @@ def facts_text(box, decision):
 
 def build_prompt(box, decision):
     return (f"{facts_text(box, decision)}\n"
+            f"Current measured box temperature: {box['temp_c']:.1f} C.\n"
+            "Use the measured temperature as current sensor data. The temperature warning, if any, "
+            "is already stated in the facts above; do not invent another warning. "
             f"Rewrite this as one short, friendly message for the courier. Keep every number. {NO_THINK}")
 
 
@@ -174,7 +177,8 @@ def invented_numbers(text, facts):
 
 def check_message(text, box, decision):
     """Return (fixed_text, None) if usable, or (text, reason) if it must be rejected."""
-    facts = facts_text(box, decision)
+    facts = (f"{facts_text(box, decision)} "
+             f"Current measured box temperature: {box['temp_c']:.1f} C.")
     level = decision["level"]
     if not text:
         return text, "empty after removing thinking text"
