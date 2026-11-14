@@ -112,13 +112,17 @@ function renderRecentItem(n) {
 
 function renderBoxCard(box) {
   const card = document.createElement('article');
-  card.className = `box-overview-card edge-${box.light || 'off'}`;
+  card.className = `box-overview-card edge-${box.light || 'off'}${box.demo ? ' is-demo' : ' is-live'}`;
 
   const header = document.createElement('div');
   header.className = 'box-overview-header';
   const identity = document.createElement('div');
   const title = document.createElement('h3');
   title.textContent = box.box_id;
+  const tag = document.createElement('span');
+  tag.className = box.demo ? 'box-tag is-demo' : 'box-tag is-live';
+  tag.textContent = box.demo ? 'demo' : 'live';
+  title.appendChild(tag);
   const location = document.createElement('p');
   location.textContent = box.location || 'Location not set';
   identity.append(title, location);
@@ -170,7 +174,10 @@ function refreshDashboard() {
       boxesById.set(item.box_id, item);
     }
   });
-  const boxes = Array.from(boxesById.values());
+  const liveBoxes = Array.from(boxesById.values());
+  // Live boxes from the board first, then the simulated demo network (network.js), skipping ids already live.
+  const demoBoxes = typeof DEMO_BOXES === 'undefined' ? [] : DEMO_BOXES.filter(box => !boxesById.has(box.box_id));
+  const boxes = [...liveBoxes, ...demoBoxes];
   const boxCount = boxes.length;
   const sampleCount = boxes.reduce((total, box) =>
     total + (typeof box.kits === 'number' && Number.isFinite(box.kits) ? box.kits : 0), 0);
@@ -193,6 +200,8 @@ function refreshDashboard() {
   const recentEvents = notificationItems.filter(isBoxEvent).slice(0, 4);
   recent.replaceChildren(...recentEvents.map(renderRecentItem));
   recentEmpty.style.display = recentEvents.length ? 'none' : 'block';
+
+  if (typeof renderNetworkMap === 'function') renderNetworkMap(liveBoxes);
 }
 
 function renderNotificationList() {

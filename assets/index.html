@@ -13,48 +13,12 @@ SPDX-License-Identifier: MPL-2.0
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <svg class="bg" viewBox="0 0 1420 800" preserveAspectRatio="xMidYMid slice"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <radialGradient id="gradTop" gradientUnits="userSpaceOnUse" cx="1000" cy="200" r="450">
-          <stop offset="0" stop-color="#477e7c" />
-          <stop offset="0.6" stop-color="#8fb3ae" />
-          <stop offset="1" stop-color="#d3dfdb" />
-        </radialGradient>
-        <radialGradient id="gradBottom" gradientUnits="userSpaceOnUse" cx="520" cy="560" r="560">
-          <stop offset="0" stop-color="#477e7c" />
-          <stop offset="0.6" stop-color="#8fb3ae" />
-          <stop offset="1" stop-color="#d3dfdb" />
-        </radialGradient>
-      </defs>
-
-      <path d="M 1245 -5
-        C 1225 40, 1150 45, 1100 50
-        C 1030 58, 985 100, 977 160
-        C 970 215, 1010 235, 1055 228
-        C 1110 220, 1160 160, 1220 120
-        C 1250 100, 1320 80, 1360 110
-        C 1400 140, 1385 200, 1340 250
-        C 1295 300, 1265 345, 1275 390
-        C 1285 440, 1350 450, 1430 395"
-        fill="none" stroke="url(#gradTop)" stroke-width="28" stroke-linecap="round" />
-      <g transform="translate(100 30)">
-        <path d="M -10 290
-        C 20 200, 70 145, 137 145
-        C 205 145, 245 190, 237 245
-        C 228 300, 190 320, 150 350
-        C 100 390, 55 430, 60 490
-        C 65 555, 120 580, 175 575
-        C 240 570, 300 520, 350 495
-        C 400 470, 460 465, 505 485
-        C 550 505, 560 560, 540 610
-        C 525 640, 470 685, 380 692
-        C 330 697, 290 685, 250 678
-        C 200 672, 170 705, 172 745
-        C 175 775, 200 795, 232 815"
-          fill="none" stroke="url(#gradBottom)" stroke-width="27" stroke-linecap="round" />
-      </g>
-    </svg>
+    <div class="bg" aria-hidden="true">
+      <div class="bg-grid"></div>
+      <div class="bg-glow glow-a"></div>
+      <div class="bg-glow glow-b"></div>
+      <div class="bg-noise"></div>
+    </div>
 
     <div class="app-shell">
       <aside class="sidebar">
@@ -135,6 +99,43 @@ SPDX-License-Identifier: MPL-2.0
               <strong id="dashboard-attention" class="metric-value">0</strong>
               <span class="metric-footnote">Urgent or collect-today status</span>
             </article>
+          </section>
+
+          <section class="network-section surface-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">LÄHILAB NETWORK · FINLAND</p>
+                <h2>Box network map</h2>
+                <p class="section-subtitle">Samples waiting in each box right now. Regions holding the fewest samples are flagged as low coverage.</p>
+              </div>
+              <span class="demo-chip"><i></i>Simulated network · demo data</span>
+            </div>
+            <div class="network-layout">
+              <div class="map-frame">
+                <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+                <svg id="finland-map" viewBox="0 0 370 640" role="img" aria-label="Map of Finland with LähiLab boxes and samples per box"></svg>
+                <div class="map-scan" aria-hidden="true"></div>
+                <div id="map-readout" class="map-readout" aria-live="polite"></div>
+              </div>
+              <aside class="region-panel">
+                <div class="network-stats">
+                  <div><span>Boxes</span><strong id="net-boxes">0</strong></div>
+                  <div><span>Samples</span><strong id="net-samples">0</strong></div>
+                  <div class="is-low"><span>Low regions</span><strong id="net-low">0</strong></div>
+                </div>
+                <p class="eyebrow">SAMPLES BY REGION</p>
+                <ol id="region-list" class="region-list"></ol>
+                <ul class="map-legend">
+                  <li><i class="lg-dot lg-green"></i>Within limits</li>
+                  <li><i class="lg-dot lg-yellow"></i>Collect today</li>
+                  <li><i class="lg-dot lg-red"></i>Urgent pickup</li>
+                  <li><i class="lg-hub"></i>Lab hub</li>
+                  <li><i class="lg-halo"></i>Low coverage</li>
+                  <li><i class="lg-route"></i>Courier route</li>
+                </ul>
+                <p class="small-note">Dot size = samples in the box. Demo boxes are simulated for the pitch; BOX-12 (Kuopio) is the live board.</p>
+              </aside>
+            </div>
           </section>
 
           <section class="boxes-section">
@@ -242,6 +243,7 @@ SPDX-License-Identifier: MPL-2.0
     <script src="libs/socket.io.min.js"></script>
     <script src="libs/arduino.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+    <script src="network.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
