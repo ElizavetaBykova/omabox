@@ -184,7 +184,7 @@ def run(name):
     return result
 
 
-def on_event(event):
+def on_event(event, quiet=False):
     """Any event for the REAL box: chat command, camera (kit_dropped), sensor (temp_reading).
     Fast: decides and shows the template message at once; the LLM rewrite runs in llm_worker.
     Returns (info, template-result-or-None)."""
@@ -194,7 +194,8 @@ def on_event(event):
         box = state.as_box()
         if result:
             card_id = latest_box_card = next(card_ids)
-    print(f"[event] {event.get('event')}: {info}")
+    if result or not quiet:                                 # periodic checks: only log when something changed
+        print(f"[event] {event.get('event')}: {info}")
     if result:
         label = f"event: {info}"
         report(card_id, label, box, result, 0, pending=True)
@@ -255,7 +256,7 @@ ui.on_message("commands", on_command)
 
 # ~10 s per LLM call. Set RUN_SELF_TEST = False for the demo, so the page starts with the real box only
 # (the camera is paused while the self-test uses the LLM).
-RUN_SELF_TEST = True
+RUN_SELF_TEST = False
 SELF_TEST = ("normal", "soon", "hpv_3h_left", "overdue", "empty", "unknown")   # one of each level
 
 
@@ -276,14 +277,16 @@ SENSOR_PERIOD_S = 30
 
 
 def sensor_loop():
-    """Feed the live temperature into the REAL box. handle_event only notifies when the level changes."""
+    """Every 30 s: live temperature + deadline check for the REAL box (hours left are recomputed on
+    every event). Without a sensor value it still sends a 'tick', so deadlines are checked anyway.
+    handle_event only notifies when the level (ok/soon/urgent/overdue) or too-warm/cold state changes."""
     while True:
         t = read_temperature_c()
-        if t is not None:
-            try:
-                on_event({"event": "temp_reading", "temp_c": t})
-            except Exception as e:
-                print(f"[sensor] ERROR: {e}")
+        try:
+            on_event({"event": "temp_reading", "temp_c": t} if t is not None else {"event": "tick"},
+                     quiet=True)
+        except Exception as e:
+            print(f"[sensor] ERROR: {e}")
         time.sleep(SENSOR_PERIOD_S)
 
 

@@ -389,6 +389,8 @@ class BoxState:
             if self.temp_c is None:
                 return False, "ignored: no temp_c in event"
             info = f"temperature {self.temp_c} C"
+        elif kind == "tick":                       # periodic time check: deadlines move even without events
+            return True, "time check"
         elif kind in ("pickup_requested", "status"):
             return True, kind.replace("_", " ")
         else:
@@ -437,13 +439,17 @@ def handle_event(state, event, ask, now=None):
     """Apply one event and, if needed, make the courier notification.
     Returns (info, result) where result is notify()'s dict or None if no message was needed."""
     now = now or datetime.now()
-    before = box_decision(state.as_box(), now)
+    # "before" = what the box last announced (not the level a moment ago at the same clock time),
+    # so time passing alone (tick / temp_reading every 30 s) moves a kit ok -> soon -> urgent -> overdue.
+    announced = getattr(state, "announced", None)
+    before = announced if announced is not None else box_decision(state.as_box(), now)
     changed, info = state.apply_event(event, now)
     if not changed:
         return info, None
     after = box_decision(state.as_box(), now)
     if not should_notify(event, before, after):
         return info, None
+    state.announced = after
     return info, notify(state.as_box(), ask, now)
 
 
