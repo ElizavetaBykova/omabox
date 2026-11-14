@@ -5,11 +5,13 @@
 #
 # How to test:
 #   1. Press Run and watch the App Lab console: a self-test runs the SELF_TEST scenarios once.
-#   2. Open the chat page and type any scenario name from omabox_logic.SCENARIOS (or 'list').
+#   2. Open the web page: notifications appear on the left. In the chat, type a command
+#      (drop HPV-0001 21h | temp 33 | collected | pickup | status) or a test scenario name.
 #      The courier message appears as the chat answer.
 #   3. Paste the console output (incl. "brick API" and "raw LLM output" lines) back to Claude.
 
 import inspect
+import os
 import threading
 import time
 from datetime import datetime
@@ -18,7 +20,8 @@ from arduino.app_bricks.llm import LargeLanguageModel
 from arduino.app_bricks.web_ui import WebUI
 from arduino.app_utils import App
 
-from omabox_logic import SCENARIOS, SYSTEM_PROMPT, notify, scenario
+from omabox_logic import (CHAT_HELP, SCENARIOS, SYSTEM_PROMPT, BoxState, handle_event, notify,
+                          parse_command, scenario)
 
 ui = WebUI()
 
@@ -111,39 +114,65 @@ def publish(item):
         print(f"(web page not updated: {e})")
 
 
-def run(name):
-    box = scenario(name)
-    with llm_lock:
-        start = time.time()
-        result = notify(box, ask)
-        secs = round(time.time() - start, 1)
-        timing = last_timing
-    line = (f"[{name}] level={result['level']} light={result['light']} "
-            f"pickup={result['pickup']} source={result['source']} ({secs}s)\n{result['message']}")
-    print(f"[{name}] LLM timing: {timing}")
-    print(f"[{name}] raw LLM output: {result['raw']!r}")
+# The real box. Its state is saved in data/ (git-ignored) so a restart keeps the kits inside.
+BOX_ID, BOX_LOCATION = "BOX-12", "Kuopio library"
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "box_state.json")
+state = BoxState(BOX_ID, BOX_LOCATION, STATE_FILE)
+
+
+def report(label, box, result, secs, timing):
+    """Print to the console and publish to the web page."""
+    print(f"[{label}] LLM timing: {timing}")
+    print(f"[{label}] raw LLM output: {result['raw']!r}")
     if result["rejected"]:
-        print(f"[{name}] LLM text rejected: {result['rejected']}")
-    print(line)
-    publish({"time": datetime.now().strftime("%H:%M:%S"), "scenario": name,
+        print(f"[{label}] LLM text rejected: {result['rejected']}")
+    print(f"[{label}] level={result['level']} light={result['light']} pickup={result['pickup']} "
+          f"source={result['source']} ({secs}s)\n{result['message']}")
+    publish({"time": datetime.now().strftime("%H:%M:%S"), "scenario": label,
              "box_id": box["box_id"], "location": box["location"], "temp_c": box["temp_c"],
              "kits": len(result["kits"]), "level": result["level"], "light": result["light"],
              "pickup": result["pickup"], "source": result["source"], "secs": secs,
              "message": result["message"], "rejected": result["rejected"]})
+
+
+def run(name):
+    """Test scenario (fake box) -> notification."""
+    box = scenario(name)
+    with llm_lock:
+        start = time.time()
+        result = notify(box, ask)
+        secs, timing = round(time.time() - start, 1), last_timing
+    report(f"test: {name}", box, result, secs, timing)
     return result
 
 
-# Chat page: type a scenario name, get the courier message back as the answer
-# (it also appears in the notifications list).
+def on_event(event):
+    """Any event for the REAL box (chat command now; camera and sensors in Phase 3/4).
+    Returns (info, result-or-None)."""
+    with llm_lock:
+        start = time.time()
+        info, result = handle_event(state, event, ask)
+        secs, timing = round(time.time() - start, 1), last_timing
+    print(f"[event] {event.get('event')}: {info}")
+    if result:
+        report(f"event: {info}", state.as_box(), result, secs, timing)
+    return info, result
+
+
+# Chat page: a command for the real box, or a test scenario name.
 def on_prompt(_, data):
-    name = (data.get("prompt", "") or "").strip().lower()
-    if name not in SCENARIOS:
-        text = "Type one of: " + ", ".join(SCENARIOS)
-    else:
-        try:
-            text = run(name)["message"]
-        except Exception as e:
-            text = f"Error: {e}"
+    text_in = (data.get("prompt", "") or "").strip()
+    try:
+        event = parse_command(text_in)
+        if event:
+            info, result = on_event(event)
+            text = f"{info}\n\n{result['message']}" if result else f"{info} (no new message needed)"
+        elif text_in.lower() in SCENARIOS:
+            text = run(text_in.lower())["message"]
+        else:
+            text = CHAT_HELP + ": " + ", ".join(SCENARIOS)
+    except Exception as e:
+        text = f"Error: {e}"
     ui.send_message("response", text)
     ui.send_message("stream_end", {})
 
@@ -161,11 +190,15 @@ ui.on_message("prompt", on_prompt)
 ui.on_message("get_notifications", on_get_notifications)
 ui.on_message("commands", on_command)
 
-# ~10 s per LLM call, so the startup self-test runs a few; the rest can be typed on the chat page.
+# ~10 s per LLM call. Set RUN_SELF_TEST = False for the demo, so the page starts with the real box only.
+RUN_SELF_TEST = True
 SELF_TEST = ("normal", "soon", "hpv_3h_left", "overdue", "empty", "unknown")   # one of each level
 
 
 def self_test():
+    on_event({"event": "status"})          # the real box first (kits restored from data/ after a restart)
+    if not RUN_SELF_TEST:
+        return
     print("=== OmaBox self-test ===")
     for n in SELF_TEST:
         try:

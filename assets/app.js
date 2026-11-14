@@ -54,7 +54,8 @@ function renderNotification(n) {
   source.className = `badge source-${n.source}`;
   source.textContent = n.source === 'llm' ? `LLM ${n.secs}s` : 'template';
   const where = document.createElement('span');
-  where.textContent = `${n.time} · ${n.box_id} · ${n.location} · ${n.kits} kits · ${n.temp_c} °C · test: ${n.scenario}`;
+  const temp = n.temp_c === null || n.temp_c === undefined ? '– °C' : `${n.temp_c} °C`;
+  where.textContent = `${n.time} · ${n.box_id} · ${n.location} · ${n.kits} kits · ${temp} · ${n.scenario}`;
   meta.append(level, source, where);
 
   const text = document.createElement('div');

@@ -108,7 +108,13 @@ fit_old, health, unknown, full) — shared by the board self-test and run_laptop
 ```
 Other events: `temp_alert`, `box_emptied`, `pickup_requested`. Kit QR codes look like `HPV-0001`, `FIT-0002`
 (any `TYPE-NUMBER`; parse with `kit_type_from_qr()`).
-Note: qr_scanner.py currently emits `"kit_detected"` with `temp_c: null` — to align in Phase 3.
+Also accepted: `kit_detected` (what qr_scanner.py emits; treated as `kit_dropped`), `temp_reading`, `status`.
+Any event may carry `temp_c`. Real box state = `BoxState` in omabox_logic.py, saved to `data/box_state.json`
+(git-ignored) after each change. `handle_event(state, event, ask)` = apply + notify if needed: always for
+kit_dropped / box_emptied / temp_alert / pickup_requested / status; for temp_reading only when the level or
+too-warm state changes. Camera (Phase 3) and Bridge (Phase 4) must just call `on_event(event)` in main.py.
+Chat commands for demo without hardware: `drop HPV-0001 21h`, `temp 33`, `collected`, `pickup`, `status`
+(or a test scenario name).
 
 ## How we work (important)
 - Editing: on the laptop, the board's app folder is mounted with sshfs at `~/omabox-board` and opened in VS Code.
@@ -117,6 +123,7 @@ Note: qr_scanner.py currently emits `"kit_detected"` with `temp_c: null` — to 
 - Running: press **Run** in Arduino App Lab. Code using `arduino.app_bricks` cannot run on the laptop;
   ask the user to run it and paste the App Lab console output (the console keeps old runs — read the newest).
 - Laptop-only test of the logic (from `python/`): `python3 run_laptop.py --no-llm` (template path),
+  `python3 run_laptop.py --no-llm --chat "drop HPV-0001 21h" "temp 33" collected` (real BoxState),
   `python3 run_laptop.py [--model qwen3:0.6b]` (Ollama), scenario names as args to run a subset.
 - Git: the user commits and pushes themselves, ON THE BOARD over SSH in `~/ArduinoApps/omabox`
   (git refuses to run through the sshfs mount). Claude Code never commits or pushes.
@@ -129,7 +136,8 @@ Note: qr_scanner.py currently emits `"kit_detected"` with `temp_c: null` — to 
 1. [x] LLM reliably answers (`source=llm`); 5 decision levels; guardrails; shared test scenarios;
        generalised to all home samples (SAMPLE_TYPES, kit_type_from_qr, unknown types flagged,
        per-sample temperature limits) — last board run of the generalised version still to confirm
-2. [ ] Real box state (BoxState.apply_event) replacing mock data, persisted to a small JSON file
+2. [x] Real box state (BoxState + handle_event), saved to data/box_state.json, chat commands, page cards;
+       checks also reject a wrong kit count and messages that leave out a problem — board run still to confirm
 3. [ ] Camera on the board: headless non-blocking scan_kit(), `kit_dropped` events; LLM in background
        (template shown at once, LLM text replaces it); camera paused while the LLM runs (RAM)
 4. [ ] Sensors over Bridge (Thermo temp, Knob = emptied, Buzzer/Pixels = status)

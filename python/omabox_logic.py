@@ -3,24 +3,43 @@
 Runs the same on your laptop and on the UNO Q. The only thing that differs
 between the two is the `ask(prompt) -> str` function you pass in.
 """
+import json
+import os
 import re
 from datetime import datetime, timedelta
 
 # Sample types and their rules. The LAB configures these; the box only enforces them.
 #   deadline_h: max hours from drop-off until the sample must be at the lab
-#   max_temp_c: box temperature above this is flagged for kits of this type
+#   max_temp_c / min_temp_c: box temperature outside this range is flagged for kits of this type
+#                            (None = no limit on that side)
+# The box itself is NOT refrigerated, so for samples that must be kept at 2-8 C we use the
+# un-chilled time limit, or the max_temp_c makes a room-temperature box flag them at once.
 # To add a type: add a row here (with its source). Everything else follows automatically.
 SAMPLE_TYPES = {
+    # --- sourced (see CLAUDE.md "Key facts") ---
     # Fimlab HPV self-sampling pilot: mail within 24 h of collection, late samples are not analysed.
-    # Dry swabs stay valid at 4-30 C in lab studies, so 30 C is the upper limit.
-    "HPV": {"name": "HPV self-sample", "deadline_h": 24, "max_temp_c": 30.0},
+    # Dry swabs stay valid at 4-30 C in lab studies (Evalyn brush).
+    "HPV": {"name": "HPV self-sample", "deadline_h": 24, "min_temp_c": 4.0, "max_temp_c": 30.0},
     # FIT: analyse within ~14 days at room temperature; heat (>30 C) degrades haemoglobin.
-    "FIT": {"name": "FIT stool kit", "deadline_h": 14 * 24, "max_temp_c": 30.0},
+    # NOTE: an unsourced list (14 Nov) said 48 h at <=25 C / 7 days refrigerated - conflicts, not used.
+    "FIT": {"name": "FIT stool kit", "deadline_h": 14 * 24, "min_temp_c": None, "max_temp_c": 30.0},
+
+    # --- UNVERIFIED (from a team list 14 Nov, no source yet; find sources before using in the pitch) ---
+    # Swab in viral transport medium (COVID-19/flu/RSV, VTM/UTM): 2-8 C, max 72 h.
+    "SWB": {"name": "swab in transport medium", "deadline_h": 72, "min_temp_c": 2.0, "max_temp_c": 8.0},
+    # Dry swab without medium (COVID-19/flu/RSV): 15-25 C, 24-48 h -> conservative 24 h.
+    "DSW": {"name": "dry swab", "deadline_h": 24, "min_temp_c": 15.0, "max_temp_c": 25.0},
+    # Cheek swab for DNA (pharmacogenetics): 15-30 C, "weeks to months" -> conservative 7 days.
+    "DNA": {"name": "DNA cheek swab", "deadline_h": 7 * 24, "min_temp_c": 15.0, "max_temp_c": 30.0},
+    # Dried blood spot on filter paper: 15-25 C, "weeks to months" -> conservative 7 days.
+    # Also must avoid high humidity (Modulino Thermo measures it - not checked yet).
+    "DBS": {"name": "dried blood spot", "deadline_h": 7 * 24, "min_temp_c": 15.0, "max_temp_c": 25.0},
+    # Unpreserved urine: 2 h if not chilled (24 h only if kept at 2-8 C; this box is not chilled).
+    "URI": {"name": "urine sample (unpreserved)", "deadline_h": 2, "min_temp_c": 2.0, "max_temp_c": None},
 }
-# A type the lab has not configured gets the strictest known rule and is flagged to the lab.
-UNKNOWN_RULE = {"name": "unknown sample type",
-                "deadline_h": min(t["deadline_h"] for t in SAMPLE_TYPES.values()),
-                "max_temp_c": min(t["max_temp_c"] for t in SAMPLE_TYPES.values())}
+# A type the lab has not configured: a fixed, cautious rule (24 h, 15-25 C) and a flag to the lab.
+# (Not "the strictest of every limit": with cold-chain types that would be an impossible 15-8 C range.)
+UNKNOWN_RULE = {"name": "unknown sample type", "deadline_h": 24, "min_temp_c": 15.0, "max_temp_c": 25.0}
 
 QR_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)-(\d+)$")   # e.g. HPV-0001, FIT-0002
 
@@ -76,7 +95,8 @@ def kit_status(kit, now):
     age_h = (now - kit["dropped_at"]).total_seconds() / 3600
     left_h = rule["deadline_h"] - age_h
     return {**kit, "age_h": round(age_h, 1), "left_h": round(left_h, 1),
-            "max_temp_c": rule["max_temp_c"], "known_type": known}
+            "max_temp_c": rule.get("max_temp_c"), "min_temp_c": rule.get("min_temp_c"),
+            "known_type": known}
 
 
 def _join(parts):
@@ -89,9 +109,12 @@ def box_decision(box, now):
     Levels: overdue > urgent > soon > ok, plus empty. Every problem found goes into the reason.
     """
     kits = sorted((kit_status(k, now) for k in box["kits"]), key=lambda k: k["left_h"])
-    # The box is too warm if it is above the limit of the most sensitive kit inside.
-    temp_limit = min((k["max_temp_c"] for k in kits), default=None)
-    too_hot = temp_limit is not None and box["temp_c"] > temp_limit
+    # Too warm / too cold = outside the limits of the most sensitive kit inside.
+    temp = box["temp_c"]
+    temp_limit = min((k["max_temp_c"] for k in kits if k["max_temp_c"] is not None), default=None)
+    temp_min = max((k["min_temp_c"] for k in kits if k["min_temp_c"] is not None), default=None)
+    too_hot = temp_limit is not None and temp is not None and temp > temp_limit
+    too_cold = temp_min is not None and temp is not None and temp < temp_min
     unknown = [k for k in kits if not k["known_type"]]
     late = [k for k in kits if k["left_h"] < 0]
     urgent = [k for k in kits if 0 <= k["left_h"] < URGENT_LEFT_H]
@@ -99,19 +122,21 @@ def box_decision(box, now):
 
     problems = []
     if too_hot:
-        problems.append(f"the box is too warm ({box['temp_c']} C, limit {temp_limit} C)")
+        problems.append(f"the box is too warm ({temp} C, limit {temp_limit} C)")
+    if too_cold:
+        problems.append(f"the box is too cold ({temp} C, minimum {temp_min} C)")
     for k in late[:2]:
         problems.append(f"kit {k['kit_id']} is {abs(k['left_h'])} h past its deadline")
     if urgent:
         problems.append(f"kit {urgent[0]['kit_id']} has {urgent[0]['left_h']} h left")
-    elif soon and not (late or too_hot):
+    elif soon and not (late or too_hot or too_cold):
         problems.append(f"kit {soon[0]['kit_id']} has {soon[0]['left_h']} h left")
 
     if not kits:
         level, reason = "empty", "no kits in the box"
     elif late:
         level = "overdue"
-    elif urgent or too_hot:
+    elif urgent or too_hot or too_cold:
         level = "urgent"
     elif soon:
         level = "soon"
@@ -129,7 +154,8 @@ def box_decision(box, now):
     light = {"empty": "off", "ok": "green", "soon": "yellow", "urgent": "red", "overdue": "red"}[level]
     return {"level": level, "reason": reason, "light": light,
             "pickup": level in ("soon", "urgent", "overdue"), "kits": kits,
-            "temp_limit": temp_limit, "notes": notes, "unknown_kits": [k["kit_id"] for k in unknown]}
+            "temp_limit": temp_limit, "too_hot": too_hot,
+            "temp_min": temp_min, "too_cold": too_cold, "notes": notes, "unknown_kits": [k["kit_id"] for k in unknown]}
 
 
 def facts_text(box, decision):
@@ -181,6 +207,19 @@ def check_message(text, box, decision):
     extra = invented_numbers(text, facts)
     if extra:
         return text, f"numbers not in the facts: {extra}"
+    n = len(decision["kits"])
+    wrong_counts = [c for c in re.findall(r"(\d+)\s+kits?\b", text, flags=re.I) if int(c) != n]
+    if wrong_counts:
+        return text, f"wrong kit count {wrong_counts} (box has {n})"
+    # Every problem in the decision must reach the courier: the kits named in it, and the heat.
+    missing = [kit_id for kit_id in re.findall(r"\b[A-Z][A-Z0-9]*-\d+\b", decision["reason"])
+               if kit_id.lower() not in text.lower()]
+    if decision["too_hot"] and not re.search(r"warm|hot|heat|temperature", text, flags=re.I):
+        missing.append("too warm")
+    if decision["too_cold"] and not re.search(r"cold|temperature", text, flags=re.I):
+        missing.append("too cold")
+    if missing:
+        return text, f"left out: {missing}"
     banned = [w for w in re.findall(BANNED, text, flags=re.I) if w.lower() not in facts.lower()]
     if banned:
         return text, f"banned words: {banned}"
@@ -265,6 +304,10 @@ SCENARIO_DATA = {
     "fit_old": ("Kotka pharmacy", 24.0, [("FIT-0501", 13 * 24 + 18)]),                 # FIT with 6 h left
     "health":  ("Lahti health centre", 21.0, [("HPV-0601", 4)]),                       # "health" is in the facts
     "unknown": ("Vantaa pharmacy", 21.0, [("UTI-0801", 2), ("HPV-0802", 5)]),         # type not in SAMPLE_TYPES
+    "urine":   ("Oulu pharmacy", 21.0, [("URI-0901", 1)]),                         # urgent: 2 h limit
+    "swab_warm": ("Turku library", 21.0, [("SWB-1001", 1)]),                       # urgent: needs 2-8 C
+    "mixed":   ("Helsinki pharmacy", 22.0, [("DNA-1101", 30), ("DBS-1102", 50), ("DSW-1103", 3)]),  # ok
+    "cold":    ("Oulu library", 2.5, [("HPV-1201", 2), ("FIT-1202", 5)]),             # urgent: too cold
     "full":    ("Espoo health centre", 23.0, [(f"{'HPV' if i % 2 else 'FIT'}-07{i:02d}", i * 1.5)
                                               for i in range(1, 9)]),                  # 8 kits
 }
@@ -277,3 +320,157 @@ def scenario(name, now=None):
     location, temp_c, kits = SCENARIO_DATA[name]
     return {"box_id": "BOX-12", "location": location, "temp_c": temp_c,
             "kits": [_kit(k, h, now) for k, h in kits]}
+
+
+# ---------------------------------------------------------------------------
+# Real box state, built from events (camera, sensors, chat commands).
+# ---------------------------------------------------------------------------
+# Events that always produce a courier notification. A plain temperature reading only does
+# when it changes the decision level (otherwise a reading every 30 s would keep the LLM busy).
+NOTIFY_EVENTS = {"kit_dropped", "box_emptied", "temp_alert", "pickup_requested", "status"}
+
+
+def parse_time(value, now):
+    """ISO time from an event -> naive local datetime. Missing/invalid -> now."""
+    if not value:
+        return now
+    try:
+        t = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return now
+    return t.astimezone().replace(tzinfo=None) if t.tzinfo else t
+
+
+class BoxState:
+    """Kits currently in the box + last temperature. Saved to a JSON file after every change,
+    so a restart of the app does not forget the kits inside."""
+
+    def __init__(self, box_id, location, path=None):
+        self.box_id, self.location, self.path = box_id, location, path
+        self.temp_c = None
+        self.kits = []            # [{"kit_id", "kit_type", "dropped_at": datetime}]
+        self.load()
+
+    # -- the dict box_decision()/notify() expect --
+    def as_box(self):
+        return {"box_id": self.box_id, "location": self.location, "temp_c": self.temp_c,
+                "kits": [dict(k) for k in self.kits]}
+
+    def apply_event(self, event, now=None):
+        """Update the state. Returns (changed, info) where info is a short human-readable line."""
+        now = now or datetime.now()
+        kind = event.get("event")
+        if kind == "kit_detected":                 # name used by qr_scanner.py
+            kind = "kit_dropped"
+        if event.get("temp_c") is not None:        # any event may carry a temperature
+            self.temp_c = round(float(event["temp_c"]), 1)
+
+        if kind == "kit_dropped":
+            parsed = kit_type_from_qr(event.get("kit_id", ""))
+            if not parsed:
+                return False, f"ignored: '{event.get('kit_id')}' is not a kit code"
+            kit_id, kit_type = parsed
+            if any(k["kit_id"] == kit_id for k in self.kits):
+                return False, f"ignored: {kit_id} is already in the box"
+            self.kits.append({"kit_id": kit_id, "kit_type": kit_type,
+                              "dropped_at": parse_time(event.get("time"), now)})
+            info = f"{kit_id} dropped"
+        elif kind == "box_emptied":
+            n = len(self.kits)
+            info = f"box emptied, {n} kit{'' if n == 1 else 's'} collected"
+            self.kits = []
+        elif kind in ("temp_reading", "temp_alert"):
+            if self.temp_c is None:
+                return False, "ignored: no temp_c in event"
+            info = f"temperature {self.temp_c} C"
+        elif kind in ("pickup_requested", "status"):
+            return True, kind.replace("_", " ")
+        else:
+            return False, f"ignored: unknown event '{kind}'"
+        self.save()
+        return True, info
+
+    def save(self):
+        if not self.path:
+            return
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        data = {"box_id": self.box_id, "location": self.location, "temp_c": self.temp_c,
+                "kits": [{**k, "dropped_at": k["dropped_at"].isoformat(timespec="seconds")}
+                         for k in self.kits]}
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, self.path)                 # atomic: never a half-written file
+
+    def load(self):
+        if not self.path or not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+            self.temp_c = data.get("temp_c")
+            self.kits = [{**k, "dropped_at": datetime.fromisoformat(k["dropped_at"])}
+                         for k in data.get("kits", [])]
+        except (OSError, ValueError, KeyError) as e:
+            print(f"BoxState: could not load {self.path} ({e}); starting empty")
+            self.kits, self.temp_c = [], None
+
+
+def _signature(decision):
+    """What the courier cares about. Hours left change every minute, so they are not part of it."""
+    return decision["level"], decision["too_hot"], decision["too_cold"]
+
+
+def should_notify(event, before, after):
+    kind = event.get("event")
+    kind = "kit_dropped" if kind == "kit_detected" else kind
+    return kind in NOTIFY_EVENTS or _signature(before) != _signature(after)
+
+
+def handle_event(state, event, ask, now=None):
+    """Apply one event and, if needed, make the courier notification.
+    Returns (info, result) where result is notify()'s dict or None if no message was needed."""
+    now = now or datetime.now()
+    before = box_decision(state.as_box(), now)
+    changed, info = state.apply_event(event, now)
+    if not changed:
+        return info, None
+    after = box_decision(state.as_box(), now)
+    if not should_notify(event, before, after):
+        return info, None
+    return info, notify(state.as_box(), ask, now)
+
+
+CHAT_HELP = ("Commands: drop <KIT-ID> [hours ago, e.g. 21h] | temp <C> | collected | pickup | status | "
+             "or a test scenario name")
+
+
+def parse_command(text, now=None):
+    """Chat command -> event dict, or None if it is not a command. Lets us demo without hardware:
+    'drop HPV-0001 21h', 'temp 33', 'collected', 'pickup', 'status'."""
+    now = now or datetime.now()
+    words = (text or "").strip().split()
+    if not words:
+        return None
+    cmd, args = words[0].lower(), words[1:]
+    if cmd == "drop" and args:
+        hours = 0.0
+        if len(args) > 1:
+            try:
+                hours = float(args[1].lower().rstrip("h"))
+            except ValueError:
+                return None
+        return {"event": "kit_dropped", "kit_id": args[0],
+                "time": (now - timedelta(hours=hours)).isoformat(timespec="seconds")}
+    if cmd == "temp" and len(args) == 1:
+        try:
+            return {"event": "temp_reading", "temp_c": float(args[0])}
+        except ValueError:
+            return None
+    if cmd in ("collected", "emptied"):
+        return {"event": "box_emptied"}
+    if cmd == "pickup":
+        return {"event": "pickup_requested"}
+    if cmd == "status":
+        return {"event": "status"}
+    return None
