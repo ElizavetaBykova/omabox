@@ -13,8 +13,12 @@ Test on the board over SSH (stop the app in App Lab first, only one program can 
     python3 camera.py photo.jpg    # decode a saved image
 """
 
+import glob
+import os
 import sys
 import time
+
+os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")   # hide OpenCV's per-index warnings
 
 from omabox_logic import kit_type_from_qr
 
@@ -51,7 +55,15 @@ class KitScanner:
             self._warn(f"camera disabled: cannot import cv2 ({e})")
             return False
         cv2 = self.cv2
-        indexes = [self.index] if self.index is not None else range(MAX_CAMERA_INDEX + 1)
+        if self.index is not None:
+            indexes = [self.index]
+        else:                      # only devices that exist (no camera plugged in = nothing to try)
+            indexes = sorted(int(p[len("/dev/video"):]) for p in glob.glob("/dev/video*")
+                             if p[len("/dev/video"):].isdigit())
+            indexes = [i for i in indexes if i <= MAX_CAMERA_INDEX] or []
+        if not indexes:
+            self._warn("camera: no /dev/video* devices; plug the USB camera into the UNO Q (powered USB-C hub)")
+            return False
         for i in indexes:
             cap = cv2.VideoCapture(i, cv2.CAP_V4L2)
             if cap.isOpened():
