@@ -13,6 +13,49 @@ SPDX-License-Identifier: MPL-2.0
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <svg class="bg" viewBox="0 0 1420 800" preserveAspectRatio="xMidYMid slice"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <radialGradient id="gradTop" gradientUnits="userSpaceOnUse" cx="1000" cy="200" r="450">
+          <stop offset="0" stop-color="#477e7c" />
+          <stop offset="0.6" stop-color="#8fb3ae" />
+          <stop offset="1" stop-color="#d3dfdb" />
+        </radialGradient>
+        <radialGradient id="gradBottom" gradientUnits="userSpaceOnUse" cx="520" cy="560" r="560">
+          <stop offset="0" stop-color="#477e7c" />
+          <stop offset="0.6" stop-color="#8fb3ae" />
+          <stop offset="1" stop-color="#d3dfdb" />
+        </radialGradient>
+      </defs>
+
+      <path d="M 1245 -5
+        C 1225 40, 1150 45, 1100 50
+        C 1030 58, 985 100, 977 160
+        C 970 215, 1010 235, 1055 228
+        C 1110 220, 1160 160, 1220 120
+        C 1250 100, 1320 80, 1360 110
+        C 1400 140, 1385 200, 1340 250
+        C 1295 300, 1265 345, 1275 390
+        C 1285 440, 1350 450, 1430 395"
+        fill="none" stroke="url(#gradTop)" stroke-width="28" stroke-linecap="round" />
+      <g transform="translate(100 30)">
+        <path d="M -10 290
+        C 20 200, 70 145, 137 145
+        C 205 145, 245 190, 237 245
+        C 228 300, 190 320, 150 350
+        C 100 390, 55 430, 60 490
+        C 65 555, 120 580, 175 575
+        C 240 570, 300 520, 350 495
+        C 400 470, 460 465, 505 485
+        C 550 505, 560 560, 540 610
+        C 525 640, 470 685, 380 692
+        C 330 697, 290 685, 250 678
+        C 200 672, 170 705, 172 745
+        C 175 775, 200 795, 232 815"
+          fill="none" stroke="url(#gradBottom)" stroke-width="27" stroke-linecap="round" />
+      </g>
+    </svg>
+
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="#" aria-label="LähiLab dashboard" data-page="dashboard">

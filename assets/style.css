@@ -8,11 +8,11 @@
 
 :root {
   color-scheme: light;
-  --page: #eef3f2;
+  --page: #f0f0e8;
   --surface: #ffffff;
   --ink: #12302c;
   --muted: #647773;
-  --line: #d7e2df;
+  --line: #0f8585;
   --teal: #0f8585;
   --teal-dark: #2e6d6d;
   --teal-soft: #e2f2f0;
@@ -57,7 +57,18 @@ button {
   display: none !important;
 }
 
+.bg {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .app-shell {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   display: grid;
   grid-template-columns: 238px minmax(0, 1fr);
@@ -211,7 +222,7 @@ button {
   gap: 16px;
   margin-bottom: 28px;
   padding-bottom: 18px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 3px solid var(--line);
 }
 
 .eyebrow {
