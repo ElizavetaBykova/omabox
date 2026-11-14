@@ -325,8 +325,17 @@ def camera_loop():
         time.sleep(SCAN_PERIOD_S)
 
 
+def show_i2c_scan():
+    """Debug: which I2C devices the MCU sees (Modulino Thermo = 0x44)."""
+    try:
+        print("I2C scan:", Bridge.call("i2c_scan", timeout=5))
+    except Exception as e:
+        print(f"(I2C scan not available: {e})")
+
+
 # Background threads, so the web page is available right away and shows notifications as they come in.
 show_brick_api()
+show_i2c_scan()
 threading.Thread(target=llm_worker, daemon=True).start()
 threading.Thread(target=self_test, daemon=True).start()
 threading.Thread(target=sensor_loop, daemon=True).start()

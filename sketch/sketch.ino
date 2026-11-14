@@ -15,11 +15,34 @@ float readTemperatureC() {
   return t;
 }
 
+// Debug: list I2C addresses on both buses. Modulino Thermo should show 0x44.
+template <typename Bus>
+String scanBus(Bus& bus) {
+  String found = "";
+  for (uint8_t a = 0x08; a < 0x78; ++a) {
+    bus.beginTransmission(a);
+    if (bus.endTransmission() == 0) {
+      found += "0x";
+      found += String(a, HEX);
+      found += " ";
+    }
+  }
+  return found.length() ? found : String("none");
+}
+
+String i2cScan() {
+  String out = "Wire: " + scanBus(Wire) + "| Wire1: " + scanBus(Wire1);
+  out += thermoOk ? "| thermo.begin OK" : "| thermo.begin FAILED";
+  return out;
+}
+
 void setup() {
   Bridge.begin();
+  Wire.begin();
   Modulino.begin();
   thermoOk = thermo.begin();
   Bridge.provide_safe("read_temperature_c", readTemperatureC);
+  Bridge.provide_safe("i2c_scan", i2cScan);
 }
 
 void loop() {}
