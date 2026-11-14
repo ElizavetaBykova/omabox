@@ -1,0 +1,7 @@
+name: OmaBox
+description: Chatbot powered by a local LLM
+ports: []
+bricks:
+- arduino:web_ui: {}
+- arduino:llm: {}
+icon: 💬
