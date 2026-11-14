@@ -7,4 +7,4 @@ data/
 .venv/
 venv/
 
-camera/events.jsonl
+python/events.jsonl
