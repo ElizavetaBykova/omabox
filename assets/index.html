@@ -46,6 +46,16 @@ SPDX-License-Identifier: MPL-2.0
           </button>
         </nav>
 
+        <div class="system-panel" aria-label="On-device AI">
+          <p class="eyebrow">EDGE AI · ON DEVICE</p>
+          <div class="sys-row"><span>Model</span><strong>Qwen3.5 0.8B</strong></div>
+          <div class="sys-row"><span>Runs on</span><strong>UNO Q · local</strong></div>
+          <div class="sys-row"><span>Cloud calls</span><strong class="sys-zero">0</strong></div>
+          <div class="sys-wave" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+        </div>
+
         <div class="sidebar-footer">
           <span id="connection-indicator" class="connection-indicator" aria-hidden="true"></span>
           <span>
@@ -62,6 +72,10 @@ SPDX-License-Identifier: MPL-2.0
             <h1 id="page-title">Box overview</h1>
           </div>
           <div class="topbar-actions">
+            <div class="hud-clock" aria-label="Local time">
+              <span id="hud-date">—</span>
+              <strong id="hud-time">--:--:--</strong>
+            </div>
             <span id="topbar-connection" class="connection-pill is-connecting">Connecting</span>
             <button id="clear-chat-button-header" class="icon-button" type="button" title="Reset chat" aria-label="Reset chat">
               <img src="img/reset.svg" alt="" />
@@ -82,7 +96,7 @@ SPDX-License-Identifier: MPL-2.0
             <article class="metric-card">
               <div class="metric-topline"><span>BOXES TRACKED</span><span class="metric-icon" aria-hidden="true">▦</span></div>
               <strong id="dashboard-box-count" class="metric-value">0</strong>
-              <span class="metric-footnote">Boxes reporting to LähiLab</span>
+              <span id="dashboard-box-split" class="metric-footnote">Boxes reporting to LähiLab</span>
             </article>
             <article class="metric-card">
               <div class="metric-topline"><span>SAMPLES IN BOXES</span><span class="metric-icon" aria-hidden="true">▤</span></div>
@@ -92,11 +106,13 @@ SPDX-License-Identifier: MPL-2.0
             <article class="metric-card">
               <div class="metric-topline"><span>PICKUPS NEEDED</span><span class="metric-icon" aria-hidden="true">↗</span></div>
               <strong id="dashboard-pickups" class="metric-value">0</strong>
+              <div class="metric-meter"><i id="meter-pickups"></i></div>
               <span class="metric-footnote">Based on each box's latest decision</span>
             </article>
             <article class="metric-card">
               <div class="metric-topline"><span>NEEDS ATTENTION</span><span class="metric-icon" aria-hidden="true">!</span></div>
               <strong id="dashboard-attention" class="metric-value">0</strong>
+              <div class="metric-meter is-red"><i id="meter-attention"></i></div>
               <span class="metric-footnote">Urgent or collect-today status</span>
             </article>
           </section>
@@ -111,11 +127,18 @@ SPDX-License-Identifier: MPL-2.0
               <span class="demo-chip"><i></i>Simulated network · demo data</span>
             </div>
             <div class="network-layout">
-              <div class="map-frame">
+              <div class="map-frame" tabindex="0" aria-label="Map. Pinch or Ctrl + scroll to zoom, drag to pan, + / - / 0 keys.">
                 <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
                 <svg id="finland-map" viewBox="0 0 370 640" role="img" aria-label="Map of Finland with LähiLab boxes and samples per box"></svg>
                 <div class="map-scan" aria-hidden="true"></div>
                 <div id="map-readout" class="map-readout" aria-live="polite"></div>
+                <div class="zoom-controls" role="group" aria-label="Map zoom">
+                  <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+                  <div class="zoom-readout"><span id="zoom-level">1.0×</span><div class="zoom-track"><i id="zoom-meter"></i></div></div>
+                  <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+                  <button id="zoom-reset" type="button" aria-label="Reset view">⟲</button>
+                </div>
+                <div id="zoom-hint" class="zoom-hint">Pinch the touchpad (or Ctrl + scroll) to zoom</div>
               </div>
               <aside class="region-panel">
                 <div class="network-stats">
@@ -144,7 +167,15 @@ SPDX-License-Identifier: MPL-2.0
                 <p class="eyebrow">MONITORED LOCATIONS</p>
                 <h2>All boxes</h2>
               </div>
-              <span id="dashboard-box-grid-count" class="total-count">0</span>
+              <div class="section-tools">
+                <div class="filter-chips" role="tablist" aria-label="Filter boxes">
+                  <button class="chip is-active" type="button" data-filter="all">All</button>
+                  <button class="chip" type="button" data-filter="pickup">Pickup needed</button>
+                  <button class="chip" type="button" data-filter="ok">Within limits</button>
+                  <button class="chip" type="button" data-filter="live">Live</button>
+                </div>
+                <span id="dashboard-box-grid-count" class="total-count">0</span>
+              </div>
             </div>
             <p id="dashboard-boxes-empty" class="empty-state">No box updates yet. A box appears here after it reports its status.</p>
             <div id="dashboard-boxes-grid" class="box-overview-grid"></div>

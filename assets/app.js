@@ -163,9 +163,90 @@ function renderBoxCard(box) {
   update.className = 'box-overview-update';
   update.textContent = box.time ? `Last update · ${box.time}` : 'Last update received';
 
-  card.append(header, metrics, decision, update);
+  let types = null;
+  if (box.types) {
+    types = document.createElement('div');
+    types.className = 'kit-types';
+    Object.entries(box.types).filter(([, n]) => n > 0).forEach(([type, n]) => {
+      const chip = document.createElement('span');
+      chip.textContent = `${type} × ${n}`;
+      types.appendChild(chip);
+    });
+    if (!types.children.length) types = null;
+  }
+
+  card.dataset.boxId = box.box_id;
+  card.tabIndex = 0;
+  card.title = 'Show on the map';
+  const focusOnMap = () => {
+    if (typeof focusBoxOnMap === 'function') {
+      focusBoxOnMap(box.box_id);
+      const map = document.querySelector('.network-section');
+      if (map) map.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+  card.addEventListener('click', focusOnMap);
+  card.addEventListener('keydown', e => { if (e.key === 'Enter') focusOnMap(); });
+
+  card.append(header, metrics, ...(types ? [types] : []), decision, update);
   return card;
 }
+
+let boxFilter = 'all';
+
+/** Animated number change (count up/down) for the metric tiles. */
+function countTo(el, value) {
+  const from = Number(el.dataset.value || 0);
+  el.dataset.value = value;
+  if (from === value || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = value;
+    return;
+  }
+  const start = performance.now();
+  const step = now => {
+    const t = Math.min((now - start) / 700, 1);
+    const e = 1 - Math.pow(1 - t, 3);
+    el.textContent = Math.round(from + (value - from) * e);
+    if (t < 1 && Number(el.dataset.value) === value) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/** Map marker clicked: scroll to that box's card and flash it. */
+function highlightBoxCard(boxId) {
+  let card = document.querySelector(`.box-overview-card[data-box-id="${boxId}"]`);
+  if (!card && boxFilter !== 'all') {
+    setBoxFilter('all');
+    card = document.querySelector(`.box-overview-card[data-box-id="${boxId}"]`);
+  }
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('is-flash');
+  void card.offsetWidth;
+  card.classList.add('is-flash');
+}
+
+function setBoxFilter(name) {
+  boxFilter = name;
+  document.querySelectorAll('.filter-chips .chip').forEach(chip => {
+    chip.classList.toggle('is-active', chip.dataset.filter === name);
+  });
+  refreshDashboard();
+}
+
+document.querySelectorAll('.filter-chips .chip').forEach(chip => {
+  chip.addEventListener('click', () => setBoxFilter(chip.dataset.filter));
+});
+
+function tickClock() {
+  const now = new Date();
+  document.getElementById('hud-time').textContent = now.toLocaleTimeString('en-GB');
+  document.getElementById('hud-date').textContent = now
+    .toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' })
+    .toUpperCase();
+}
+tickClock();
+setInterval(tickClock, 1000);
 
 function refreshDashboard() {
   const boxesById = new Map();
@@ -184,16 +265,28 @@ function refreshDashboard() {
   const pickupCount = boxes.filter(box => box.pickup).length;
   const attentionCount = boxes.filter(box => box.light === 'red' || box.light === 'yellow').length;
 
-  document.getElementById('dashboard-box-count').textContent = boxCount;
-  document.getElementById('dashboard-kits').textContent = sampleCount;
-  document.getElementById('dashboard-pickups').textContent = pickupCount;
-  document.getElementById('dashboard-attention').textContent = attentionCount;
-  document.getElementById('dashboard-box-grid-count').textContent = boxCount;
+  countTo(document.getElementById('dashboard-box-count'), boxCount);
+  countTo(document.getElementById('dashboard-kits'), sampleCount);
+  countTo(document.getElementById('dashboard-pickups'), pickupCount);
+  countTo(document.getElementById('dashboard-attention'), attentionCount);
+  document.getElementById('dashboard-box-split').textContent =
+    `${liveBoxes.length} live · ${demoBoxes.length} simulated`;
+  document.getElementById('meter-pickups').style.width = `${boxCount ? (pickupCount / boxCount) * 100 : 0}%`;
+  document.getElementById('meter-attention').style.width = `${boxCount ? (attentionCount / boxCount) * 100 : 0}%`;
+
+  const filters = {
+    all: () => true,
+    pickup: box => box.pickup,
+    ok: box => !box.pickup && (box.level === 'ok' || box.level === 'empty'),
+    live: box => !box.demo,
+  };
+  const shown = boxes.filter(filters[boxFilter] || filters.all);
+  document.getElementById('dashboard-box-grid-count').textContent = shown.length;
 
   const boxesGrid = document.getElementById('dashboard-boxes-grid');
   const boxesEmpty = document.getElementById('dashboard-boxes-empty');
-  boxesGrid.replaceChildren(...boxes.map(renderBoxCard));
-  boxesEmpty.style.display = boxCount ? 'none' : 'block';
+  boxesGrid.replaceChildren(...shown.map(renderBoxCard));
+  boxesEmpty.style.display = shown.length ? 'none' : 'block';
 
   const recent = document.getElementById('dashboard-activity');
   const recentEmpty = document.getElementById('dashboard-activity-empty');
@@ -577,6 +670,9 @@ document.querySelectorAll('[data-page]').forEach(link => {
     showPage(link.dataset.page);
   });
 });
+
+// Entrance animations only on first load (later refreshes must not flicker).
+setTimeout(() => document.getElementById('page-dashboard').classList.add('is-settled'), 1600);
 
 setConnectionState('connecting');
 renderNotificationList();

@@ -171,6 +171,14 @@ BOX_ID, BOX_LOCATION = "BOX-12", "Kuopio library"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "box_state.json")
 state = BoxState(BOX_ID, BOX_LOCATION, STATE_FILE)
 
+# Demo: start every run with an empty box (kits saved in data/box_state.json by an earlier run are dropped).
+# Set to False to keep the kits across restarts (the real-life behaviour).
+START_EMPTY = True
+if START_EMPTY and state.kits:
+    print(f"START_EMPTY: removing {len(state.kits)} kit(s) left from the last run")
+    state.kits = []
+    state.save()
+
 
 def report(card_id, label, box, result, secs, timing=None, pending=False):
     """Print to the console and publish (or replace) a card on the web page."""
