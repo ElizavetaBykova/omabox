@@ -1,4 +1,4 @@
-name: OmaBox
+name: omabox
 description: Chatbot powered by a local LLM
 ports: []
 bricks:
