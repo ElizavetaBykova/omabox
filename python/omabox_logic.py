@@ -81,6 +81,43 @@ def kit_type_from_qr(qr_text):
     return (m.group(0), m.group(1)) if m else None
 
 
+# Courier QR codes: "COURIER-0001/BOX-12" = courier COURIER-0001 collects box BOX-12 (all kits out,
+# cards reset). Both parts are checked: only known couriers, and only for THIS box, so a code printed
+# for another box (or a random "COURIER-..." print) does not empty this one.
+COURIER_PREFIX = "COURIER"
+COURIER_CODES = {"COURIER-0001"}
+COURIER_QR = re.compile(r"^(COURIER-\d+)/([A-Z0-9][A-Z0-9-]*)$")
+
+
+def qr_code_of_interest(qr_text):
+    """Normalised QR text if it is a kit code or a courier code, else None (used by camera.py)."""
+    text = (qr_text or "").strip().upper()
+    return text if (COURIER_QR.fullmatch(text) or kit_type_from_qr(text)) else None
+
+
+def event_from_qr(code, time_iso, box_id):
+    """QR text from the camera -> event, or None to ignore.
+    'COURIER-0001/BOX-12' -> box_emptied (if it is this box), 'HPV-0001' -> kit_dropped."""
+    text = (code or "").strip().upper()
+    m = COURIER_QR.fullmatch(text)
+    if m:
+        courier, target = m.groups()
+        if courier not in COURIER_CODES:
+            print(f"camera: unknown courier {courier} ignored")
+            return None
+        if target != box_id.upper():
+            print(f"camera: courier code is for {target}, this is {box_id}; ignored")
+            return None
+        return {"event": "box_emptied", "by": courier, "box_id": target, "time": time_iso}
+    parsed = kit_type_from_qr(text)
+    if not parsed:
+        return None
+    if parsed[1] == COURIER_PREFIX:
+        print(f"camera: courier code {parsed[0]} has no box id (expected {parsed[0]}/{box_id}); ignored")
+        return None
+    return {"event": "kit_dropped", "kit_id": parsed[0], "time": time_iso}
+
+
 def rule_for(kit_type):
     """(rule, known) for a sample type."""
     return (SAMPLE_TYPES[kit_type], True) if kit_type in SAMPLE_TYPES else (UNKNOWN_RULE, False)
@@ -376,6 +413,8 @@ class BoxState:
             if not parsed:
                 return False, f"ignored: '{event.get('kit_id')}' is not a kit code"
             kit_id, kit_type = parsed
+            if kit_type == COURIER_PREFIX:
+                return False, f"ignored: {kit_id} is a courier code, not a kit"
             if any(k["kit_id"] == kit_id for k in self.kits):
                 return False, f"ignored: {kit_id} is already in the box"
             self.kits.append({"kit_id": kit_id, "kit_type": kit_type,
@@ -384,6 +423,8 @@ class BoxState:
         elif kind == "box_emptied":
             n = len(self.kits)
             info = f"box emptied, {n} kit{'' if n == 1 else 's'} collected"
+            if event.get("by"):
+                info += f" by {event['by']}"
             self.kits = []
         elif kind in ("temp_reading", "temp_alert"):
             if self.temp_c is None:

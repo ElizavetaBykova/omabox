@@ -20,7 +20,7 @@ import time
 
 os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")   # hide OpenCV's per-index warnings
 
-from omabox_logic import kit_type_from_qr
+from omabox_logic import qr_code_of_interest
 
 WIDTH, HEIGHT = 640, 480       # QR codes on kits are small; 320x240 missed them at arm's length
 MAX_CAMERA_INDEX = 9           # the UNO Q also has non-camera video nodes; try until one gives a frame
@@ -28,10 +28,9 @@ REOPEN_AFTER_S = 5             # after a failure, wait this long before trying t
 
 
 def decode(cv2, detector, frame):
-    """Frame -> kit code like 'HPV-0001', or None. Ignores QR codes that are not kit codes."""
+    """Frame -> kit code like 'HPV-0001', or None. Also courier codes ('COURIER-0001/BOX-12'); ignores other QR codes."""
     text, _, _ = detector.detectAndDecode(frame)
-    parsed = kit_type_from_qr(text) if text else None
-    return parsed[0] if parsed else None
+    return qr_code_of_interest(text) if text else None
 
 
 class KitScanner:

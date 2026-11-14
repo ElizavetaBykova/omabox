@@ -24,8 +24,8 @@ from arduino.app_bricks.web_ui import WebUI
 from arduino.app_utils import App, Bridge
 
 from camera import KitScanner
-from omabox_logic import (CHAT_HELP, SCENARIOS, SYSTEM_PROMPT, BoxState, handle_event, notify,
-                          parse_command, scenario)
+from omabox_logic import (CHAT_HELP, SCENARIOS, SYSTEM_PROMPT, BoxState, event_from_qr, handle_event,
+                          notify, parse_command, scenario)
 
 ui = WebUI()
 
@@ -115,7 +115,23 @@ llm_jobs = queue.Queue()
 SENSOR_ERROR_C = -99.0          # this or lower = sensor error (sketch sends -999)
 
 
+cleared_up_to = 0                # cards with id <= this were cleared by a pickup; never show them again
+
+
+def clear_cards(keep_from_id):
+    """Pickup made: remove every card on the page (also late LLM rewrites of old cards)."""
+    global cleared_up_to
+    cleared_up_to = keep_from_id - 1
+    notifications.clear()
+    try:
+        ui.send_message("notifications", [])
+    except Exception as e:
+        print(f"(web page not updated: {e})")
+
+
 def publish(item):
+    if isinstance(item.get("id"), int) and item["id"] <= cleared_up_to:
+        return
     for i, old in enumerate(notifications):
         if old.get("id") == item.get("id"):
             notifications[i] = item
@@ -196,6 +212,8 @@ def on_event(event, quiet=False):
             card_id = latest_box_card = next(card_ids)
     if result or not quiet:                                 # periodic checks: only log when something changed
         print(f"[event] {event.get('event')}: {info}")
+    if result and event.get("event") == "box_emptied":
+        clear_cards(card_id)                                # page starts fresh: only the "0 kits" card
     if result:
         label = f"event: {info}"
         report(card_id, label, box, result, 0, pending=True)
@@ -319,8 +337,9 @@ def camera_loop():
                 last_seen[code] = now    # still in view -> keeps it from firing again
                 if fresh:
                     print(f"camera: saw {code}")
-                    on_event({"event": "kit_dropped", "kit_id": code,
-                              "time": datetime.now().isoformat(timespec="seconds")})
+                    event = event_from_qr(code, datetime.now().isoformat(timespec="seconds"), BOX_ID)
+                    if event:                # kit -> kit_dropped, courier code -> box_emptied
+                        on_event(event)
         except Exception as e:           # never let the camera thread die
             print(f"camera: ERROR {e}")
             scanner.release()
