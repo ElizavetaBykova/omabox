@@ -3,83 +3,232 @@
 Runs the same on your laptop and on the UNO Q. The only thing that differs
 between the two is the `ask(prompt) -> str` function you pass in.
 """
+import re
 from datetime import datetime, timedelta
 
-# How long a kit may wait before it must be at the lab (hours).
-# HPV: Fimlab asks people to mail the sample within 24 h of taking it.
-# FIT: manufacturers advise analysis within ~14 days at room temperature.
-DEADLINE_H = {"HPV": 24, "FIT": 14 * 24}
+# Sample types and their rules. The LAB configures these; the box only enforces them.
+#   deadline_h: max hours from drop-off until the sample must be at the lab
+#   max_temp_c: box temperature above this is flagged for kits of this type
+# To add a type: add a row here (with its source). Everything else follows automatically.
+SAMPLE_TYPES = {
+    # Fimlab HPV self-sampling pilot: mail within 24 h of collection, late samples are not analysed.
+    # Dry swabs stay valid at 4-30 C in lab studies, so 30 C is the upper limit.
+    "HPV": {"name": "HPV self-sample", "deadline_h": 24, "max_temp_c": 30.0},
+    # FIT: analyse within ~14 days at room temperature; heat (>30 C) degrades haemoglobin.
+    "FIT": {"name": "FIT stool kit", "deadline_h": 14 * 24, "max_temp_c": 30.0},
+}
+# A type the lab has not configured gets the strictest known rule and is flagged to the lab.
+UNKNOWN_RULE = {"name": "unknown sample type",
+                "deadline_h": min(t["deadline_h"] for t in SAMPLE_TYPES.values()),
+                "max_temp_c": min(t["max_temp_c"] for t in SAMPLE_TYPES.values())}
 
-TEMP_MAX_C = 30.0    # above this, flag the box as too warm
+QR_PATTERN = re.compile(r"^([A-Z][A-Z0-9]*)-(\d+)$")   # e.g. HPV-0001, FIT-0002
+
 URGENT_LEFT_H = 4    # less time left than this -> urgent pickup
 SOON_LEFT_H = 12     # less time left than this -> pickup soon
 
-SYSTEM_PROMPT = (
-    "You write short status messages for a lab courier about a sample drop-off box. "
-    "Use only the facts given. Do not invent numbers. Do not give medical advice. "
-    "Answer in at most 2 short sentences."
-)
+# Kept short on purpose: on the board, reading the prompt costs as much time as writing the answer.
+SYSTEM_PROMPT = ("You rewrite status notes for a lab courier. Use only the given facts and numbers. "
+                 "Never mention health, risk or test results. At most 2 short sentences.")
+
+# The exact action the courier must read. Python decides it; the LLM only words the rest.
+ACTION = {"empty": "No pickup needed, you can skip this stop.",
+          "ok": "No pickup needed yet.",
+          "soon": "Please collect today.",
+          "urgent": "Please collect as soon as possible.",
+          # Whether a late sample can still be used is the lab's call, never the box's.
+          "overdue": "Please collect as soon as possible and tell the lab it is late."}
+
+# Guardrails on the LLM text (case-insensitive regexes).
+# MUST_SAY: every pattern must match, otherwise we append the exact action ourselves.
+PICKUP = r"collect|pick ?up"
+NO_PICKUP = r"no pickup|not needed"
+MUST_SAY = {"urgent": (PICKUP,), "soon": (PICKUP,), "overdue": (PICKUP, r"\blab\b"),
+            "ok": (NO_PICKUP,), "empty": (NO_PICKUP + "|skip",)}
+TELL_LAB = "Please tell the lab it is late."
+NOT_URGENT = r"urgent|as soon as possible|immediately|please collect"
+MUST_NOT_SAY = {"urgent": NO_PICKUP + "|skip", "soon": NO_PICKUP + "|skip", "overdue": NO_PICKUP + "|skip",
+                "ok": NOT_URGENT, "empty": NOT_URGENT}
+# Words a courier message never needs (medical framing or made-up story). Ignored if they are in the facts,
+# e.g. a location called "health centre".
+BANNED = (r"risk|diagnos|result|positive|negative|cancer|disease|infect|abnormal|health|patient|"
+          r"deliver|client|arriv|drop(?:ped)? off|skipped|was collected|has collected")
+
+NO_THINK = "/no_think"   # Qwen3 switch: skip the <think> block (much faster on the board)
+MAX_MESSAGE_CHARS = 300
+
+
+def kit_type_from_qr(qr_text):
+    """'HPV-0001' -> ('HPV-0001', 'HPV'). Returns None if the text is not a kit code.
+    The type may still be unknown to SAMPLE_TYPES; rule_for() handles that."""
+    m = QR_PATTERN.fullmatch((qr_text or "").strip().upper())
+    return (m.group(0), m.group(1)) if m else None
+
+
+def rule_for(kit_type):
+    """(rule, known) for a sample type."""
+    return (SAMPLE_TYPES[kit_type], True) if kit_type in SAMPLE_TYPES else (UNKNOWN_RULE, False)
 
 
 def kit_status(kit, now):
-    """Hours since drop-off and hours left before the kit's deadline."""
+    """Hours since drop-off and hours left before the kit's deadline (per its sample type)."""
+    rule, known = rule_for(kit["kit_type"])
     age_h = (now - kit["dropped_at"]).total_seconds() / 3600
-    left_h = DEADLINE_H[kit["kit_type"]] - age_h
-    return {**kit, "age_h": round(age_h, 1), "left_h": round(left_h, 1)}
+    left_h = rule["deadline_h"] - age_h
+    return {**kit, "age_h": round(age_h, 1), "left_h": round(left_h, 1),
+            "max_temp_c": rule["max_temp_c"], "known_type": known}
+
+
+def _join(parts):
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def box_decision(box, now):
-    """Decide what the box needs. Plain code, so the numbers are always correct."""
+    """Decide what the box needs. Plain code, so the numbers are always correct.
+
+    Levels: overdue > urgent > soon > ok, plus empty. Every problem found goes into the reason.
+    """
     kits = sorted((kit_status(k, now) for k in box["kits"]), key=lambda k: k["left_h"])
-    too_hot = box["temp_c"] > TEMP_MAX_C
+    # The box is too warm if it is above the limit of the most sensitive kit inside.
+    temp_limit = min((k["max_temp_c"] for k in kits), default=None)
+    too_hot = temp_limit is not None and box["temp_c"] > temp_limit
+    unknown = [k for k in kits if not k["known_type"]]
+    late = [k for k in kits if k["left_h"] < 0]
+    urgent = [k for k in kits if 0 <= k["left_h"] < URGENT_LEFT_H]
+    soon = [k for k in kits if URGENT_LEFT_H <= k["left_h"] < SOON_LEFT_H]
+
+    problems = []
+    if too_hot:
+        problems.append(f"the box is too warm ({box['temp_c']} C, limit {temp_limit} C)")
+    for k in late[:2]:
+        problems.append(f"kit {k['kit_id']} is {abs(k['left_h'])} h past its deadline")
+    if urgent:
+        problems.append(f"kit {urgent[0]['kit_id']} has {urgent[0]['left_h']} h left")
+    elif soon and not (late or too_hot):
+        problems.append(f"kit {soon[0]['kit_id']} has {soon[0]['left_h']} h left")
 
     if not kits:
-        level, reason = "empty", "no kits in the box, the courier can skip this stop"
-    elif kits[0]["left_h"] < URGENT_LEFT_H or too_hot:
+        level, reason = "empty", "no kits in the box"
+    elif late:
+        level = "overdue"
+    elif urgent or too_hot:
         level = "urgent"
-        reason = (f"box is too warm ({box['temp_c']} C)" if too_hot
-                  else f"kit {kits[0]['kit_id']} has {kits[0]['left_h']} h left")
-    elif kits[0]["left_h"] < SOON_LEFT_H:
-        level, reason = "soon", f"kit {kits[0]['kit_id']} has {kits[0]['left_h']} h left"
+    elif soon:
+        level = "soon"
     else:
-        level, reason = "ok", "all kits are well within their deadlines"
+        level = "ok"
+        reason = ("the kit is well within its deadline" if len(kits) == 1
+                  else "all kits are well within their deadlines")
+    if level in ("overdue", "urgent", "soon"):
+        reason = _join(problems)
 
-    light = {"empty": "off", "ok": "green", "soon": "yellow", "urgent": "red"}[level]
+    # Extra sentences the courier/lab must read, whatever the level.
+    notes = [f"Kit {k['kit_id']} has an unknown sample type ({k['kit_type']}), please check it with the lab."
+             for k in unknown[:2]]
+
+    light = {"empty": "off", "ok": "green", "soon": "yellow", "urgent": "red", "overdue": "red"}[level]
     return {"level": level, "reason": reason, "light": light,
-            "pickup": level in ("soon", "urgent"), "kits": kits}
+            "pickup": level in ("soon", "urgent", "overdue"), "kits": kits,
+            "temp_limit": temp_limit, "notes": notes, "unknown_kits": [k["kit_id"] for k in unknown]}
+
+
+def facts_text(box, decision):
+    """The facts, already as a correct plain message. The LLM rewrites it; the checks compare against it."""
+    n = len(decision["kits"])
+    text = f"{box['box_id']} at {box['location']} has {n} kit{'' if n == 1 else 's'}"
+    if decision["level"] != "empty":
+        reason = decision["reason"]
+        text += f". {reason[0].upper()}{reason[1:]}"
+    return " ".join([f"{text}.", *decision["notes"], ACTION[decision["level"]]])
 
 
 def build_prompt(box, decision):
-    lines = [f"Box: {box['box_id']} at {box['location']}",
-             f"Kits inside: {len(decision['kits'])}",
-             f"Temperature: {box['temp_c']} C",
-             f"Decision: {decision['level']}, because {decision['reason']}"]
-    for k in decision["kits"][:3]:
-        lines.append(f"- {k['kit_id']} ({k['kit_type']}): waited {k['age_h']} h, {k['left_h']} h left")
-    return "\n".join(lines) + "\nWrite the courier message."
+    return (f"{facts_text(box, decision)}\n"
+            f"Rewrite this as one short, friendly message for the courier. Keep every number. {NO_THINK}")
+
+
+def clean_llm_text(text):
+    """Remove Qwen thinking text and formatting; return just the message."""
+    text = text or ""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)   # complete think blocks
+    if "</think>" in text:                     # opening tag missing: drop everything before the close
+        text = text.split("</think>")[-1]
+    if "<think>" in text:                      # never closed (ran out of tokens): drop the rest
+        text = text.split("<think>")[0]
+    text = text.replace(NO_THINK, "")
+    text = re.sub(r"^\s*(?:message|courier message|note|box)\s*:\s*", "", text, flags=re.I)  # leading label
+    text = re.sub(r"[*_`#]+", "", text)        # markdown
+    text = re.sub(r"\s+", " ", text).strip().strip('"').strip()
+    if len(text) > MAX_MESSAGE_CHARS:          # cut at the last full sentence that fits
+        cut = text[:MAX_MESSAGE_CHARS]
+        end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        text = cut[:end + 1] if end > 0 else cut
+    return text
+
+
+def invented_numbers(text, facts):
+    """Numbers in the message that are not in the facts we gave the model."""
+    allowed = {float(n) for n in re.findall(r"\d+(?:\.\d+)?", facts)}   # "3.0" == "3"
+    return [n for n in re.findall(r"\d+(?:\.\d+)?", text) if float(n) not in allowed]
+
+
+def check_message(text, box, decision):
+    """Return (fixed_text, None) if usable, or (text, reason) if it must be rejected."""
+    facts = facts_text(box, decision)
+    level = decision["level"]
+    if not text:
+        return text, "empty after removing thinking text"
+    extra = invented_numbers(text, facts)
+    if extra:
+        return text, f"numbers not in the facts: {extra}"
+    banned = [w for w in re.findall(BANNED, text, flags=re.I) if w.lower() not in facts.lower()]
+    if banned:
+        return text, f"banned words: {banned}"
+    if re.search(MUST_NOT_SAY[level], text, flags=re.I):
+        return text, f"contradicts the decision '{level}'"
+    missing = [p for p in MUST_SAY[level] if not re.search(p, text, flags=re.I)]
+    if missing:                                              # add the action ourselves
+        add = TELL_LAB if missing == [r"\blab\b"] else ACTION[level]
+        if len(text) + len(add) > MAX_MESSAGE_CHARS:
+            return text, f"action for '{level}' missing"
+        text = f"{text.rstrip('.!')}. {add}"
+    for kit_id, note in zip(decision["unknown_kits"], decision["notes"]):
+        if kit_id.lower() not in text.lower() or not re.search(r"\blab\b", text, flags=re.I):
+            text = f"{text.rstrip('.!')}. {note}"            # unknown-type flag must reach the lab
+    if len(text) > MAX_MESSAGE_CHARS + 120:
+        return text, "too long"
+    box_id = box["box_id"]
+    text = re.sub(re.escape(box_id), box_id, text, flags=re.I)   # "Box-12" -> "BOX-12"
+    if box_id not in text:
+        text = f"{box_id}: {text}"                           # model forgot the box id
+    return text, None
 
 
 def template_message(box, decision):
     """Fallback if the LLM is slow, fails, or writes something unusable."""
-    action = {"empty": "No pickup needed.", "ok": "No pickup needed yet.",
-              "soon": "Please collect today.", "urgent": "Please collect as soon as possible."}
-    return (f"{box['box_id']} ({box['location']}): {len(decision['kits'])} kits, "
-            f"{decision['reason']}. {action[decision['level']]}")
+    return facts_text(box, decision)
 
 
 def notify(box, ask, now=None):
-    """Make the courier message. `ask` is any function prompt -> text."""
+    """Make the courier message. `ask` is any function prompt -> text.
+
+    Returns the decision plus: message, source ("llm" or "template"),
+    raw (what the model said) and rejected (why the LLM text was not used, or None).
+    """
     now = now or datetime.now()
     decision = box_decision(box, now)
+    prompt = build_prompt(box, decision)
+    raw, rejected = "", None
     try:
-        text = (ask(build_prompt(box, decision)) or "").strip()
-        # Basic guardrail: must be short and mention the right box.
-        if not text or len(text) > 300 or box["box_id"] not in text:
-            raise ValueError("unusable LLM answer")
+        raw = ask(prompt) or ""
+        text, problem = check_message(clean_llm_text(raw), box, decision)
+        if problem:
+            raise ValueError(problem)
         source = "llm"
-    except Exception:
+    except Exception as e:
+        rejected = str(e) or type(e).__name__
         text, source = template_message(box, decision), "template"
-    return {**decision, "message": text, "source": source}
+    return {**decision, "message": text, "source": source, "raw": raw, "rejected": rejected}
 
 
 def mock_box(now=None):
@@ -95,3 +244,36 @@ def mock_box(now=None):
             {"kit_id": "HPV-0003", "kit_type": "HPV", "dropped_at": now - timedelta(hours=3)},
         ],
     }
+
+
+def _kit(kit_id, hours_ago, now):
+    kit_id, kit_type = kit_type_from_qr(kit_id)
+    return {"kit_id": kit_id, "kit_type": kit_type, "dropped_at": now - timedelta(hours=hours_ago)}
+
+
+# Test scenarios shared by main.py (board) and run_laptop.py, so results are comparable.
+# Each entry: name -> (location, temp_c, [(kit_id, hours_ago), ...]). Comment = expected level.
+SCENARIO_DATA = {
+    "normal":  ("Kuopio library", 21.5, [("FIT-0002", 48), ("HPV-0003", 3)]),           # ok / green
+    "hpv_3h_left": ("Kuopio library", 21.5, [("HPV-0001", 21), ("FIT-0002", 48), ("HPV-0003", 3)]),  # urgent
+    "warm":    ("Kuopio library", 33.0, [("HPV-0001", 21), ("FIT-0002", 48), ("HPV-0003", 3)]),  # urgent
+    "empty":   ("Kuopio library", 21.5, []),                                         # empty / off
+    "soon":    ("Tampere pharmacy", 22.0, [("HPV-0101", 15), ("FIT-0102", 5)]),        # yellow level
+    "single":  ("Oulu pharmacy", 20.0, [("FIT-0201", 30)]),                            # "1 kit" grammar
+    "overdue": ("Joensuu library", 21.0, [("HPV-0301", 26), ("HPV-0302", 2)]),         # past its deadline
+    "hot_late": ("Rovaniemi library", 31.5, [("HPV-0401", 22)]),                       # too warm AND 2 h left
+    "fit_old": ("Kotka pharmacy", 24.0, [("FIT-0501", 13 * 24 + 18)]),                 # FIT with 6 h left
+    "health":  ("Lahti health centre", 21.0, [("HPV-0601", 4)]),                       # "health" is in the facts
+    "unknown": ("Vantaa pharmacy", 21.0, [("UTI-0801", 2), ("HPV-0802", 5)]),         # type not in SAMPLE_TYPES
+    "full":    ("Espoo health centre", 23.0, [(f"{'HPV' if i % 2 else 'FIT'}-07{i:02d}", i * 1.5)
+                                              for i in range(1, 9)]),                  # 8 kits
+}
+SCENARIOS = tuple(SCENARIO_DATA)
+
+
+def scenario(name, now=None):
+    """Fake box state for one named test scenario."""
+    now = now or datetime.now()
+    location, temp_c, kits = SCENARIO_DATA[name]
+    return {"box_id": "BOX-12", "location": location, "temp_c": temp_c,
+            "kits": [_kit(k, h, now) for k, h in kits]}

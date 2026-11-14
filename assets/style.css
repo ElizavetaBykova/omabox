@@ -440,3 +440,112 @@ button:hover {
   color: #aa4335;
   margin: 0;
 }
+
+/* ---------- OmaBox notifications panel ---------- */
+.omabox-layout {
+  display: flex;
+  gap: 16px;
+  height: calc(100vh - 130px);
+}
+
+.omabox-layout .main-content {
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+#notifications-panel {
+  width: 440px;
+  flex-shrink: 0;
+  background: #ecf1f1;
+  border-radius: 8px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.panel-header h2 {
+  font-size: 16px;
+  color: #2c353a;
+}
+
+#notification-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #008184;
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+.panel-empty {
+  font-size: 13px;
+  color: #5d6a6b;
+}
+
+.notification {
+  background: #ffffff;
+  border-radius: 8px;
+  border-left: 6px solid #c9d2d2;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  color: #2c353a;
+}
+
+.notification.light-red { border-left-color: #c0392b; }
+.notification.light-yellow { border-left-color: #e0a800; }
+.notification.light-green { border-left-color: #2e8b57; }
+.notification.light-off { border-left-color: #9aa5a6; }
+
+.notification-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: #5d6a6b;
+  margin-bottom: 4px;
+}
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 0 6px;
+  background: #dae3e3;
+  color: #2c353a;
+}
+
+.badge.level-overdue, .badge.level-urgent { background: #f6d9d5; color: #8f2d20; }
+.badge.level-soon { background: #fbefc7; color: #6b5200; }
+.badge.level-ok { background: #d6efe1; color: #1e5e3b; }
+.badge.source-llm { background: #d3ecec; color: #005c5e; }
+.badge.source-llm, .badge.source-template { text-transform: none; }
+
+.notification-rejected {
+  font-size: 12px;
+  color: #5d6a6b;
+  margin-top: 4px;
+}
+
+@media (max-width: 900px) {
+  .omabox-layout {
+    flex-direction: column;
+    height: auto;
+  }
+  #notifications-panel {
+    width: 100%;
+    max-height: 45vh;
+  }
+  .omabox-layout .main-content {
+    height: 70vh;
+  }
+}

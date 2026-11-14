@@ -9,7 +9,7 @@ SPDX-License-Identifier: MPL-2.0
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Edge AI Assistant</title>
+    <title>OmaBox</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -18,7 +18,7 @@ SPDX-License-Identifier: MPL-2.0
         <div class="header">
           <div class="header-left">
             <img src="img/RGB-Arduino-Logo-Color-Inline-Loop.svg" alt="Arduino Logo" class="arduino-logo" />
-            <p class="arduino-text">Edge AI Assistant</p>
+            <p class="arduino-text">OmaBox — sample box notifications</p>
           </div>
           <div class="header-right">
             <button id="clear-chat-button-header">
@@ -29,33 +29,42 @@ SPDX-License-Identifier: MPL-2.0
             </button>
           </div>
         </div>
+        <div class="omabox-layout">
+        <aside id="notifications-panel">
+          <div class="panel-header">
+            <h2>Notifications</h2>
+            <span id="notification-count">0</span>
+          </div>
+          <p id="no-notifications" class="panel-empty">Waiting for the box… (the self-test sends the first ones)</p>
+          <div id="notifications"></div>
+        </aside>
         <div class="main-content">
           <div id="chat-container">
             <div id="chat-messages-container">
               <div id="empty-chat-container">
                 <div class="icon-and-greeting">
                   <img src="img/green-stars.svg" alt="Green Stars" />
-                  <p class="greeting">Hi there!</p>
+                  <p class="greeting">Test a scenario</p>
                 </div>
-                <p class="prompt-question">What’s on your mind?</p>
+                <p class="prompt-question">Type a scenario name, e.g. normal, soon, hpv_3h_left, overdue, empty, unknown</p>
               </div>
               <div id="messages"></div>
             </div>
             <div class="input-container">
               <div class="textarea-wrapper">
-                <textarea id="user-input" placeholder="Type your message here..."></textarea>
+                <textarea id="user-input" placeholder="Scenario name (normal, soon, hpv_3h_left, warm, overdue, empty, unknown, …)"></textarea>
               </div>
               <button id="send-button">
                 <img src="img/send.svg" alt="Send" />
               </button>
             </div>
-            <p class="disclaimer">Responses are generated from pre-existing knowledge. No live web access.</p>
             <p class="disclaimer">
-              This application is meant to demonstrate the capabilities of different LLM models as they are, hence your
-              prompt and the LLM answer are unfiltered. Use AI responsibly.
+              Messages are worded by a small LLM running locally on the board and checked against the box's facts;
+              if a check fails, a fixed template is used. OmaBox does not analyse samples or give medical advice.
             </p>
             <button id="stop-stream-button" hidden>Stop Stream</button>
           </div>
+        </div>
         </div>
       </main>
     </div>

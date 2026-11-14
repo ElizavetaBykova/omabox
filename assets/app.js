@@ -10,6 +10,8 @@ ui.on_message('stream_end', handleStreamEnd);
 ui.on_message('llm_error', handleLLMError);
 ui.on_message('command_ok', handleCompletedCommand);
 ui.on_message('command_error', handleCommandError);
+ui.on_message('notification', handleNotification);
+ui.on_message('notifications', handleNotificationList);
 
 let thinkingMessageElement = null;
 let lastUserPrompt = '';
@@ -29,6 +31,62 @@ const clearChatButton = document.getElementById('clear-chat-button-header');
 
 function onUIConnected() {
   console.log('Connected to backend');
+  hideError();
+  ui.send_message('get_notifications', {}); // also shows notifications made before the page was opened
+}
+
+// ---------- OmaBox notifications ----------
+const notificationsContainer = document.getElementById('notifications');
+const noNotifications = document.getElementById('no-notifications');
+const notificationCount = document.getElementById('notification-count');
+
+/** Builds one notification card. Uses textContent only (no HTML from the backend). */
+function renderNotification(n) {
+  const card = document.createElement('div');
+  card.className = `notification light-${n.light}`;
+
+  const meta = document.createElement('div');
+  meta.className = 'notification-meta';
+  const level = document.createElement('span');
+  level.className = `badge level-${n.level}`;
+  level.textContent = n.level + (n.pickup ? ' · pickup' : '');
+  const source = document.createElement('span');
+  source.className = `badge source-${n.source}`;
+  source.textContent = n.source === 'llm' ? `LLM ${n.secs}s` : 'template';
+  const where = document.createElement('span');
+  where.textContent = `${n.time} · ${n.box_id} · ${n.location} · ${n.kits} kits · ${n.temp_c} °C · test: ${n.scenario}`;
+  meta.append(level, source, where);
+
+  const text = document.createElement('div');
+  text.textContent = n.message;
+  card.append(meta, text);
+
+  if (n.rejected) {
+    const why = document.createElement('div');
+    why.className = 'notification-rejected';
+    why.textContent = `LLM text not used: ${n.rejected}`;
+    card.appendChild(why);
+  }
+  return card;
+}
+
+function updateNotificationCount() {
+  const count = notificationsContainer.children.length;
+  notificationCount.textContent = count;
+  noNotifications.style.display = count ? 'none' : 'block';
+}
+
+/** A new notification: newest on top. */
+function handleNotification(n) {
+  notificationsContainer.prepend(renderNotification(n));
+  updateNotificationCount();
+}
+
+/** The full list (oldest first) sent on connect. */
+function handleNotificationList(list) {
+  notificationsContainer.innerHTML = '';
+  (list || []).forEach(n => notificationsContainer.prepend(renderNotification(n)));
+  updateNotificationCount();
 }
 
 function onUIDisconnected() {
