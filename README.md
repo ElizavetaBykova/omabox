@@ -1,161 +1,136 @@
-# Edge AI Assistant
+# LähiLab: a smart drop-off box for home lab samples
 
-The **Edge AI Assistant** example demonstrates how to build a generative AI chatbot using the Arduino® UNO Q. It uses a Large Language Model (LLM) to create a chatbot that helps you in your daily life. The board exploits its own hardware features to run the model locally, preserving the confidentiality of your data.
+> A smart drop-off box for home cancer tests that makes sure no sample arrives too late,
+> and no courier drives to an empty box.
 
-> **AI Usage Disclaimer:** This application is meant to demonstrate the capabilities of different LLM models as they are, hence your prompt and the LLM answer are unfiltered. Use AI responsibly. Applications meant for final usage are recommended to include guardrails to filter unwanted prompts and answers.
+Built at **Junction 2026 (Helsinki)** for the Arduino challenge *Green European Renaissance*.
+Tag: **Junction Finland 2026**.
 
-## Description
+LähiLab is a drop-off box for home-collected lab samples. It starts with HPV self-sampling kits and FIT
+stool kits from national screening. The box goes in a pharmacy, library or health centre where a lab
+courier already stops. It runs on an **Arduino UNO Q**, and all AI runs **locally on the board**, with no cloud.
 
-This App transforms the UNO Q into an AI assistant. It uses the `llm` Brick to connect to a local AI model and the `web_ui` Brick to provide a chat-like interface.
+- A **camera** reads the QR code on each kit (kit ID + sample type) and timestamps the drop-off.
+- A **Modulino Thermo** checks the temperature inside the box.
+- Python logic works out every kit's deadline and decides whether a courier is needed:
+  *no pickup*, *collect today*, *as soon as possible*, or *late, tell the lab*.
+- A **small LLM on the board** (Qwen3.5 0.8B through llama.cpp) writes the short message for the
+  courier or lab. Guardrails check it, and a fixed template is used if the check fails.
+- A **web dashboard** on the board shows live box status, the messages, and a map of a demo box network.
 
-The interface comes with some pre-built prompts and a free text area. The thread of messages is developed according to a chat style: your enquiries on the right and the AI replies on the left.
-Moreover, there are some tips buttons that help you in building your prompts in the input text area.
+> **LähiLab never analyses samples or gives a diagnosis or medical advice.** Labs (e.g. Fimlab) do that.
+> Whether a late sample can still be used is always the lab's decision, never the box's.
 
-## Bricks Used
+## Why
 
-The Edge AI Assistant example uses the following Bricks:
+- Fimlab's HPV self-sampling pilot requires the sample to be mailed within **24 h** of collection;
+  late samples are not analysed (fimlab.fi).
+- In one US lab, **14 %** of FIT samples were rejected for arriving more than 14 days after collection, and
+  **6 %** because the collection date was missing (Federal Practitioner 2024;41(suppl 2):S42).
+- Self-sampling and reminders raised cervical screening participation in a Finnish study from
+  72.6 % → 79.2 % → 82.2 % (Int J Cancer 2015;136(6):E677–E684).
 
-- `llm`: Brick to interact with the local Large Language Models (LLMs) onboard the Arduino UNO Q.
-- `web_ui`: Brick to create the chatbot-like web interface.
+**Green angle:** a wasted sample means a new kit, new post, a new lab run, and sometimes a person who
+gives up on screening. Couriers also skip trips to empty boxes, and the AI runs on a small low-power board.
 
-## Hardware Requirements
+## How it works
 
-### Hardware
-
-- Arduino UNO Q (x1)
-- [USB-C® cable](https://store.arduino.cc/products/usb-c-cable-24-pin) (for power and programming) (x1)
-
-## How to Use the Example
-
-### Configure & Launch App
-
-1. **Duplicate the Example**
-
-   Since built-in examples are read-only, you must duplicate this App to edit the configuration. Click the arrow next to the App name and select **Duplicate** or click the **Copy and edit app** button on the top right corner of the App page.
-
-   ![Duplicate example](assets/docs_assets/duplicate-app.png)
-
-2. **Run the App**
-
-   Launch the App by clicking the **Run** button in the top right corner. Wait for the App to start.
-
-3. **Access the Web Interface**
-
-   Open the App in your browser at `<UNO-IP-ADDRESS>:7000`.
-
-### Interacting with the App
-
-1. **Choose Your Card**
-
-   You have the opportunity to start a conversation with the AI using a pre-built prompt or submit your own question.
-
-2. **Chat page**
-
-   In the chat page you can have a conversation with the AI.
-   Your enquiries are on the right and the AI replies on the left in a chat-like style.
-
-3. **Enhance your prompt**
-
-   Click on the tips buttons to enhance your prompts to make them more sophisticated.
-
-   The text inside the clicked button will be appended to your prompt in the text area.
-
-4. **Interact**
-
-   The AI responses are streamed in real-time. Once complete, you can:
-
-   - **Continue on that topic** asking more questions.
-   - Click **Reset chat** to reset the interface and start over.
-
-## How it Works
-
-Once the App is running, it performs the following operations:
-
-- **Chatbot UI**: The `web_ui` Brick creates an HTML page where users can interact with the LLM in a chat-like style.
-- **AI Inference**: The `llm` Brick sends the prompt to the local LLM.
-- **Stream Processing**: Instead of waiting for the full text, the backend receives the response in chunks (tokens) and forwards them immediately to the frontend via WebSockets, ensuring that the user sees progress instantly.
-
-## Understanding the Code
-
-### 🔧 Backend (`main.py`)
-
-The Python® script handles the logic of connecting to the AI and managing the data flow. Note that the API Key is not hardcoded; it is retrieved automatically from the Brick configuration.
-
-- **Initialization**: The `LargeLanguageModel` is set up with a system prompt that enforces HTML formatting for the output, and for meaningful responses.
-
-```python
-llm = LargeLanguageModel(system_prompt=load_system_prompt())
-
-llm.with_memory(10)
+```
+ kit QR ──► camera.py ──┐
+                        ├─► BoxState + box_decision()  ──► template message ──► dashboard card (at once)
+ Thermo ──► sketch.ino ─┘     (Python: all numbers,          │
+          (Bridge)             deadlines, pickup)            └─► local LLM rewords it ──► check_message()
+                                                                   ──► card updated (or template kept)
 ```
 
-- **Prompt execution**: The `generate_prompt` function gets the prompt from the user and queries the LLM. The LLM response is streamed to the UI with the function `ui.send_message("response", resp)`.
+1. A kit QR code (`HPV-0001`, `FIT-0002`, any `TYPE-NUMBER`) becomes a `kit_dropped` event.
+   A courier QR code (`COURIER-0001/BOX-12`) empties the box. A courier code for another box is refused.
+2. `omabox_logic.py` updates the saved box state (`data/box_state.json`) and computes the decision level:
 
-```python
-def generate_prompt(_, data):
-    try:
-        prompt = data.get('prompt', '')
-        # Use the plain text prompt for the LLM and stream the response
-        for resp in llm.chat_stream(prompt):
-            ui.send_message("response", resp)
+   | level | light | pickup | when |
+   |---|---|---|---|
+   | empty | off | no | no kits |
+   | ok | green | no | all kits have ≥ 12 h left, box within limits |
+   | soon | yellow | yes, "collect today" | a kit has < 12 h left |
+   | urgent | red | yes, "as soon as possible" | a kit has < 4 h left, or the box is too warm/cold for a kit in it |
+   | overdue | red | yes, plus "tell the lab it is late" | a kit is past its deadline |
 
-        # Signal the end of the stream
-        ui.send_message("stream_end", {})
-    except Exception as e:
-        ui.send_message("llm_error", {"error": str(e)})
+3. The correct message is first written as plain facts by a template and shown right away.
+   The LLM then only **rewords** it (about 10 s on the board). `check_message()` rejects invented numbers,
+   wrong kit counts, medical words, and text that contradicts the decision.
+4. The temperature is read every 30 s. A new message is sent only when the level changes.
+
+### Sample types
+
+The lab configures the rules in `SAMPLE_TYPES` (`python/omabox_logic.py`), and the box enforces them.
+The box is **not refrigerated**, so it accepts room-temperature samples only.
+
+| code | sample | deadline | temperature |
+|---|---|---|---|
+| HPV | HPV self-sample | 24 h | 4–30 °C |
+| FIT | FIT stool kit | 14 days | ≤ 30 °C |
+| DSW, DNA, DBS | dry swab, DNA cheek swab, dried blood spot | 24 h / 7 d / 7 d | *examples, not yet sourced* |
+| anything else | unknown type | 24 h | 15–25 °C, flagged "check it with the lab" |
+
+## Hardware
+
+- Arduino UNO Q (2 GB RAM)
+- Modulino Thermo on the Qwiic connector (I2C `Wire1`, address `0x45`/`0x44`)
+- USB webcam through a USB-C hub
+- Printed kit / courier QR codes: see `qr_codes/`
+
+## Run it
+
+### On the board (Arduino App Lab)
+
+1. Copy this folder to the board as an App Lab app (`~/ArduinoApps/omabox`).
+2. Press **Run** in Arduino App Lab. The first LLM message takes about 25 s while the model loads.
+3. Open the dashboard at `http://<UNO-Q-IP>:7000`.
+4. Show a kit QR code to the camera, or type chat commands on the page:
+
+   ```
+   drop HPV-0001 21h     # a kit dropped 21 h ago
+   temp 33               # pretend the box is 33 °C
+   pickup | status       # ask for a pickup / the current status
+   collected             # the courier emptied the box
+   hpv_3h_left           # load a test scenario (see SCENARIO_DATA)
+   ```
+
+> Do **not** add `opencv-python` to `python/requirements.txt`. The board already ships `cv2`, and a pip copy
+> breaks the bricks (`ImportError: libGL.so.1`). If that happens, delete `~/ArduinoApps/omabox/.cache/.venv`
+> on the board and run again.
+
+### On a laptop (logic only, no Arduino needed)
+
+From `python/`:
+
+```bash
+python3 run_laptop.py --no-llm                                     # all test scenarios, template messages
+python3 run_laptop.py --no-llm normal overdue                      # only some scenarios
+python3 run_laptop.py --no-llm --chat "drop HPV-0001 21h" "temp 33" collected
+python3 run_laptop.py --model qwen3:0.6b                           # use a local Ollama model as the LLM
+python3 camera.py                                                  # test the QR camera
 ```
 
-### 💻 Frontend (`app.js`)
+## Project layout
 
-The JavaScript manages the complex UI interactions, buttons, and WebSocket communication.
-
-- **UI event listeners**: The frontend listens for chunks of text and appends them to the display buffer, creating the streaming effect.
-
-```javascript
-function initUI() {
-  ui.on_message('response', handleResponse);
-  ui.on_message('stream_end', handleStreamEnd);
-  ui.on_message('llm_error', handleLLMError);
-  ui.on_message('command_ok', handleCompletedCommand);
-  ui.on_message('command_error', handleCommandError);
-  // ...
-}
-
-function handleResponse(data) {
-  const ai_msg = document.getElementById('active-ai-response');
-  if (thinkingMessageElement) {
-    // First chunk of stream
-    const textContent = thinkingMessageElement.querySelector('.text-content');
-    if (textContent) {
-      textContent.innerHTML = '';
-    }
-    thinkingMessageElement.classList.remove('thinking-message');
-    thinkingMessageElement.dataset.rawText = '';
-    thinkingMessageElement = null;
-  }
-
-  if (ai_msg) {
-    ai_msg.dataset.rawText += data;
-    const textContent = ai_msg.querySelector('.text-content');
-    if (textContent) {
-      textContent.innerHTML = marked.parse(ai_msg.dataset.rawText);
-    }
-  }
-}
-
-function handleStreamEnd() {
-  removeThinkingMessage(); // Ensure it's removed if stream ends
-  ai_msg = document.getElementById('active-ai-response');
-  if (ai_msg) {
-    ai_msg.id = '';
-  }
-  if (sendButton) {
-    sendButton.classList.remove('sending-state');
-    if (sendButtonImg) {
-      sendButtonImg.src = 'img/send.svg';
-    }
-  }
-  updateSendButtonState(); // Update button state after stream ends
-  updateClearChatButtonState(); // Update clear chat button state after stream ends
-}
 ```
+├── app.yaml               # App Lab descriptor (bricks: llm, web_ui)
+├── assets/                # dashboard: index.html, app.js (live box + messages), network.js (demo map)
+├── python/
+│   ├── main.py            # board entry point: LLM brick, web UI, camera / sensor / LLM threads
+│   ├── omabox_logic.py    # plain Python: sample rules, decisions, prompt, guardrails, BoxState, scenarios
+│   ├── camera.py          # headless QR scanner (KitScanner.scan_kit)
+│   ├── run_laptop.py      # laptop test harness (template or Ollama)
+│   └── qr_scanner.py      # early desktop QR scanner (not used by the app)
+├── sketch/sketch.ino      # MCU: reads the Thermo, exposes read_temperature_c over the Bridge
+└── qr_codes/              # printable test QR codes
+```
+
+The boxes on the dashboard map, other than the live board (`BOX-12`, Kuopio library), are **simulated
+demo data**.
+
+## Team
+
+Junction 2026: two developers (board, logic & LLM / sensors & camera) and one business lead
+(data, mentors, pitch).

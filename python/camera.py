@@ -27,6 +27,32 @@ MAX_CAMERA_INDEX = 9           # the UNO Q also has non-camera video nodes; try 
 REOPEN_AFTER_S = 5             # after a failure, wait this long before trying the camera again
 
 
+def quiet_opencv(cv2):
+    """The env var only works if set before *any* cv2 import (a brick may import it first), so also set it here."""
+    try:
+        cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    except Exception:
+        try:
+            cv2.setLogLevel(2)
+        except Exception:
+            pass
+
+
+def describe(i):
+    """'/dev/videoN' -> its driver name + why it cannot be opened (permission / busy / ok)."""
+    try:
+        with open(f"/sys/class/video4linux/video{i}/name") as f:
+            name = f.read().strip()
+    except OSError:
+        name = "? (no /sys info - inside a container?)"
+    try:
+        os.close(os.open(f"/dev/video{i}", os.O_RDWR | os.O_NONBLOCK))
+        why = "opens OK (but gives no frames - probably not a camera)"
+    except OSError as e:
+        why = f"cannot open: {e.strerror}"   # Permission denied / Device or resource busy / No such device
+    return f"{name} | {why}"
+
+
 def decode(cv2, detector, frame):
     """Frame -> kit code like 'HPV-0001', or None. Also courier codes ('COURIER-0001/BOX-12'); ignores other QR codes."""
     text, _, _ = detector.detectAndDecode(frame)
@@ -50,6 +76,7 @@ class KitScanner:
             if self.cv2 is None:
                 import cv2         # imported here so a missing cv2 only disables the camera
                 self.cv2, self.detector = cv2, cv2.QRCodeDetector()
+                quiet_opencv(cv2)
         except Exception as e:
             self._warn(f"camera disabled: cannot import cv2 ({e})")
             return False
@@ -76,7 +103,9 @@ class KitScanner:
                     self.warned = False
                     return True
             cap.release()
-        self._warn("camera: no working camera found (is it plugged in? is another program using it?)")
+        self._warn("camera: no working camera found. Devices seen:\n" +
+                   "\n".join(f"  /dev/video{i}: {describe(i)}" for i in indexes) +
+                   "\n  (a USB webcam usually shows as 'USB ...'/'UVC ...'; 'venus' = the board's video codec, not a camera)")
         return False
 
     def _warn(self, text):

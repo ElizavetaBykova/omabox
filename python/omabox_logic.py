@@ -62,7 +62,7 @@ NO_PICKUP = r"no pickup|not needed"
 MUST_SAY = {"urgent": (PICKUP,), "soon": (PICKUP,), "overdue": (PICKUP, r"\blab\b"),
             "ok": (NO_PICKUP,), "empty": (NO_PICKUP + "|skip",)}
 TELL_LAB = "Please tell the lab it is late."
-NOT_URGENT = r"urgent|as soon as possible|immediately|please collect"
+NOT_URGENT = r"urgent|as soon as possible|immediately|please collect|ready for (?:pick ?up|collection)"
 MUST_NOT_SAY = {"urgent": NO_PICKUP + "|skip", "soon": NO_PICKUP + "|skip", "overdue": NO_PICKUP + "|skip",
                 "ok": NOT_URGENT, "empty": NOT_URGENT}
 # Words a courier message never needs (medical framing or made-up story). Ignored if they are in the facts,
