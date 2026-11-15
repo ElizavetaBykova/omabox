@@ -132,5 +132,9 @@ demo data**.
 
 ## Team
 
+Elizaveta Bykova
+Anastasia Pulkova
+Elizaveta Ustinova
+
 Junction 2026: two developers (board, logic & LLM / sensors & camera) and one business lead
 (data, mentors, pitch).
