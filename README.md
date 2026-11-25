@@ -133,7 +133,7 @@ demo data**.
 ## Team
 
 Elizaveta Bykova
-Anastasia Pulkova
+Anastasia Pylova
 Elizaveta Ustinova
 
 Junction 2026: two developers (board, logic & LLM / sensors & camera) and one business lead
